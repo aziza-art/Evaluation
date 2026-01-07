@@ -1,5 +1,5 @@
 {
-  "name": "Feedback Industriel - Qualité Enseignement",
-  "description": "Une application d'évaluation de la qualité des cours pour les étudiants en génie industriel, intégrant l'analyse IA pour l'amélioration continue.",
+  "name": "IUP Enquête Satisfaction",
+  "description": "Plateforme d'enquête de satisfaction et d'évaluation de la qualité pour les étudiants de l'Institut de Génie Industriel.",
   "requestFramePermissions": []
 }

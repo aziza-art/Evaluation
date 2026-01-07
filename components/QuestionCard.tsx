@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { RatingValue } from '../types';
 import { LucideIcon, AlertTriangle, CheckCircle2 } from 'lucide-react';
@@ -45,6 +44,31 @@ const QuestionCard: React.FC<QuestionCardProps> = ({
     }
   }, [value]);
 
+  // Détermination de la couleur sémantique du bouton sélectionné
+  const getButtonStyles = (optValue: RatingValue) => {
+    if (value !== optValue) {
+      return isMissing
+        ? 'bg-slate-900/60 border-red-900/30 text-slate-500 hover:border-red-500/50 hover:text-red-200'
+        : 'bg-slate-950/40 border-slate-800/60 text-slate-500 hover:border-indigo-500/50 hover:bg-slate-800/60 hover:text-white';
+    }
+
+    // Styles pour l'état sélectionné
+    const baseSelected = 'transform scale-105 z-10 ring-2 text-white';
+    
+    // Cas Négatif / Faible
+    if (optValue === 'Non' || optValue === 25 || optValue === 'Flou') {
+      return `${baseSelected} bg-red-800 border-red-400 shadow-[0_10px_30px_rgba(239,68,68,0.5)] ring-red-500/50`;
+    }
+    
+    // Cas Positif / Maximum
+    if (optValue === 'Oui' || optValue === 100) {
+      return `${baseSelected} bg-emerald-800 border-emerald-400 shadow-[0_10px_30px_rgba(16,185,129,0.5)] ring-emerald-500/50`;
+    }
+
+    // Cas Intermédiaire (50%, 75%, autres chaines)
+    return `${baseSelected} bg-blue-900 border-blue-400 shadow-[0_10px_40px_rgba(30,58,138,0.6)] ring-blue-500/50`;
+  };
+
   return (
     <div className={`p-8 rounded-[32px] transition-all duration-500 mb-8 group cursor-default relative overflow-hidden border-2 backdrop-blur-md ${
       isMissing 
@@ -53,7 +77,6 @@ const QuestionCard: React.FC<QuestionCardProps> = ({
           ? `bg-emerald-500/5 border-emerald-500/40 shadow-[0_20px_60px_rgba(16,185,129,0.15)] ring-1 ring-emerald-500/20 ${animate ? 'animate-pop animate-selection-glow' : ''}`
           : 'bg-slate-900/40 border-slate-800/60 hover:border-indigo-500/40 hover:bg-slate-900/60 hover:shadow-[0_25px_50px_rgba(79,70,229,0.15)] hover:-translate-y-1'
     }`}>
-      {/* Background Decor */}
       <div className={`absolute -right-4 -bottom-4 opacity-[0.03] transition-transform duration-700 group-hover:scale-110 group-hover:rotate-12 ${isSelected ? 'text-emerald-500' : 'text-indigo-400'}`}>
         <Icon size={120} />
       </div>
@@ -111,25 +134,17 @@ const QuestionCard: React.FC<QuestionCardProps> = ({
         </div>
       </div>
       
-      <div className={`grid gap-3 sm:gap-4 mt-10 relative z-10 ${options.length === 2 ? 'grid-cols-2' : 'grid-cols-4'}`}>
+      <div className={`grid gap-3 sm:gap-4 mt-10 relative z-10 ${options.length <= 2 ? 'grid-cols-2' : options.length === 3 ? 'grid-cols-3' : 'grid-cols-4'}`}>
         {options.map((opt) => (
           <button
             key={opt.label}
             type="button"
             onClick={() => onChange(opt.value)}
-            className={`group/btn py-4 px-2 rounded-2xl font-black text-xs sm:text-sm uppercase tracking-widest border-2 transition-all duration-300 relative overflow-hidden ${
-              value === opt.value
-                ? (opt.value === 0 && options.length === 2 
-                    ? 'bg-red-600 border-red-400 text-white transform scale-105 shadow-[0_10px_30px_rgba(239,68,68,0.4)] z-10' 
-                    : 'bg-indigo-600 border-indigo-400 text-white transform scale-105 shadow-[0_10px_30px_rgba(79,70,229,0.4)] z-10')
-                : isMissing
-                  ? 'bg-slate-900/60 border-red-900/30 text-slate-500 hover:border-red-500/50 hover:text-red-200'
-                  : 'bg-slate-950/40 border-slate-800/60 text-slate-500 hover:border-indigo-500/50 hover:bg-slate-800/60 hover:text-white'
-            }`}
+            className={`group/btn py-4 px-2 rounded-2xl font-black text-xs sm:text-sm uppercase tracking-widest border-2 transition-all duration-300 relative overflow-hidden ${getButtonStyles(opt.value)}`}
           >
             <span className="relative z-10">{opt.label}</span>
             {value === opt.value && <div className="absolute inset-0 bg-white/10 animate-shimmer"></div>}
-            <div className="absolute inset-0 bg-indigo-500/0 group-hover/btn:bg-indigo-500/5 transition-colors duration-300"></div>
+            <div className="absolute inset-0 bg-white/0 group-hover/btn:bg-white/5 transition-colors duration-300"></div>
           </button>
         ))}
       </div>

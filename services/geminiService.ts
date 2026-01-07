@@ -1,39 +1,40 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
 import { FeedbackData, AnalysisResult } from "../types";
 
 export const analyzeFeedback = async (data: FeedbackData): Promise<AnalysisResult> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
-  let systemInstruction = "";
-  let userPrompt = "";
-  
-  // Set context and persona via systemInstruction config for better results
-  if (data.type === 'module') {
-    systemInstruction = "Vous êtes un Expert en Pédagogie GI. Analysez le feedback d'un module et générez un résumé ainsi que 3 recommandations constructives pour l'enseignant.";
-    userPrompt = `
-      Module: ${data.subject}
-      Scores: Objectifs: ${data.q1}% | Échanges: ${data.q2}% | Soutien: ${data.q3}% | Structure: ${data.q4}% | Éval: ${data.q5}%
-      Commentaire: ${data.comments || "N/A"}
-    `;
-  } else if (data.type === 'global_orientation') {
-    systemInstruction = "Vous êtes un Expert en Stratégie Académique. Analysez ce diagnostic sur l'orientation professionnelle et générez une synthèse institutionnelle ainsi que 2 pistes d'amélioration.";
-    userPrompt = `
-      Diagnostic : Orientation Professionnelle
-      Satisfaction: ${data.q6}%
-      Commentaire: ${data.comments || "N/A"}
-    `;
-  } else if (data.type === 'global_env') {
-    systemInstruction = "Vous êtes un Expert en Logistique et Vie Étudiante. Analysez le diagnostic ressources pour évaluer l'impact des infrastructures sur les conditions d'étude.";
-    userPrompt = `
-      Diagnostic Ressources :
-      - Salles: ${data.q7_salles}%
-      - Accès Numérique: ${data.q7_ressources}%
-      - Possession PC: ${data.q7_pc}%
-      - Transport: ${data.q7_transport}
-      Commentaire: ${data.comments || "N/A"}
-    `;
-  }
+  const isEnv = data.subject === 'ENVIRONNEMENT_GLOBAL';
+
+  const systemInstruction = `Vous êtes un Expert en Audit de Qualité Académique pour une formation d'Ingénierie (Génie Industriel). 
+  Analysez les données de diagnostic fournies et produisez une synthèse stratégique avec 3 recommandations d'amélioration.
+  ${isEnv ? "Focus : Environnement et infrastructures de l'institut." : "Focus : Pédagogie et qualité de l'enseignement du cours."}`;
+
+  const pedagogyPrompt = !isEnv ? `
+    Analyse du cours : ${data.subject}
+    ---
+    Critères (Score sur 100) :
+    1. Clarté des objectifs au début : ${data.q1}%
+    2. Promotion des échanges/questions en cours : ${data.q2}%
+    3. Disponibilité de l'enseignant hors cours : ${data.q3}%
+    4. Clarté/Structure des supports et explications : ${data.q4}%
+    5. Pertinence des évaluations (compétences acquises) : ${data.q5}%
+  ` : `
+    Analyse de l'Environnement Global
+    ---
+    1. Connaissance des débouchés métiers : ${data.q6_jobs}
+    2. Adaptabilité des salles (confort/éclairage) : ${data.q7_rooms}%
+    3. Suffisance des ressources (Wi-Fi/Labo) : ${data.q8_resources}%
+    4. Logistique Transport : ${data.q9_transport}
+    5. Possession d'un ordinateur portable : ${data.q10_laptop}
+  `;
+
+  const userPrompt = `
+    ${pedagogyPrompt}
+    Commentaires de l'étudiant : "${data.comments || "Aucun commentaire additionnel."}"
+    
+    Veuillez extraire le sentiment global, une synthèse courte et 3 points d'action concrets.
+  `;
 
   try {
     const response = await ai.models.generateContent({
@@ -45,35 +46,21 @@ export const analyzeFeedback = async (data: FeedbackData): Promise<AnalysisResul
         responseSchema: {
           type: Type.OBJECT,
           properties: {
-            summary: { 
-              type: Type.STRING,
-              description: 'Une synthèse courte et professionnelle.'
-            },
-            recommendations: { 
-              type: Type.ARRAY,
-              items: { type: Type.STRING },
-              description: 'Liste de recommandations actionnables.'
-            },
-            sentiment: { 
-              type: Type.STRING,
-              description: 'Sentiment global de l\'étudiant (positive, neutral, negative).'
-            }
+            summary: { type: Type.STRING },
+            recommendations: { type: Type.ARRAY, items: { type: Type.STRING } },
+            sentiment: { type: Type.STRING }
           },
-          required: ["summary", "recommendations", "sentiment"],
-          propertyOrdering: ["summary", "recommendations", "sentiment"]
+          required: ["summary", "recommendations", "sentiment"]
         }
       }
     });
 
-    // Directly access text property as recommended by the SDK guidelines
-    const jsonStr = response.text.trim();
-    return JSON.parse(jsonStr) as AnalysisResult;
+    return JSON.parse(response.text.trim()) as AnalysisResult;
   } catch (error) {
-    console.error("Gemini Analysis Error:", error);
     return {
-      summary: "Diagnostic enregistré. L'analyse IA détaillée sera traitée par l'administration.",
-      recommendations: ["Vérifier la qualité des infrastructures.", "Évaluer les besoins en équipements mobiles."],
-      sentiment: 'neutral'
+      summary: "Audit enregistré. L'analyse détaillée sera générée lors de la prochaine synchronisation.",
+      recommendations: ["Améliorer les supports visuels.", "Renforcer l'interactivité.", "Clarifier les modalités d'examen."],
+      sentiment: 'neutre'
     };
   }
 };

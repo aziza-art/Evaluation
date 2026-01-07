@@ -1,890 +1,863 @@
-
-import React, { useState, useMemo, useEffect } from 'react';
-import { FeedbackData, AnalysisResult, FeedbackType, SubjectStats, FeedbackEntry } from './types';
+import React, { useState, useMemo } from 'react';
+import { FeedbackData, FeedbackEntry } from './types';
 import QuestionCard from './components/QuestionCard';
+import { saveFeedback, getHistory, downloadHistoryCSV, getSubjectStats, downloadAggregatedStatsCSV } from './services/storageService';
 import { analyzeFeedback } from './services/geminiService';
 import { sendAnalysisToAdmin } from './services/emailService';
-import { saveFeedback, getCompletedSubjectNames, getSubjectStats, getSubjectHistory, getHistory } from './services/storageService';
 import { 
-  GraduationCap, Send, Factory, ChevronRight, CheckCircle2, 
-  MessageSquareText, Calculator, Cpu, Globe, Settings, BookOpen,
-  Target, MessageSquare, Clock, Layers, Award, Search, XCircle,
-  Hash, Zap, AlertCircle, Activity, QrCode, Sparkles, Briefcase, 
-  Monitor, ShieldCheck, Info, Sun, Wifi, Laptop, Car, Bus, Bike, MapPin,
-  ArrowLeft, BarChart3, TrendingUp, Users, MessageCircle, Code, LayoutDashboard, Mail, History, Calendar, Filter, SortAsc, Loader2,
-  ExternalLink, ArrowUpRight, ClipboardList
+  Factory, CheckCircle2, 
+  Target, MessageSquare, BookOpen, Award, 
+  ShieldCheck, MapPin, Truck, HelpCircle,
+  Menu, X, Lock, AlertCircle, Info,
+  Book, Building2, LayoutGrid, ArrowLeft,
+  Search, ChevronUp, ChevronDown, Maximize2, Minimize2,
+  Table as TableIcon, History, BarChart3, Copy, Users,
+  TrendingUp, Calendar, Hash, Zap, Share2, Download,
+  LogOut, ShieldAlert, Filter, RotateCcw, Activity,
+  Globe, BarChart, PieChart, Laptop, Play
 } from 'lucide-react';
 
-interface Subject {
-  name: string;
-  category: string;
-  icon: any;
-  color: string;
-  type: FeedbackType;
-}
+type AppStep = 'welcome' | 'hub' | 'modules' | 'form_pedagogy' | 'form_env' | 'submitting' | 'thanks';
+type AdminTab = 'historique' | 'stats_details' | 'table';
+type SortKey = 'timestamp' | 'subject' | 'score';
+type SortOrder = 'asc' | 'desc';
 
-const GLOBAL_DIAGNOSTICS: Subject[] = [
-  { name: "Orientation Professionnelle", category: "Diagnostic Global", icon: Briefcase, color: "text-emerald-400", type: 'global_orientation' },
-  { name: "Environnements & Ressources", category: "Diagnostic Global", icon: Monitor, color: "text-amber-400", type: 'global_env' }
+const GI_SUBJECTS = [
+  "Algèbre 1",
+  "Algorithmique et Programmation C",
+  "Analyse 1",
+  "Anglais 1",
+  "Circuits Électriques",
+  "Circuits Électroniques",
+  "Environnement Informatique",
+  "Français 1",
+  "Introduction au Génie Industriel",
+  "Mécanique générale"
 ];
-
-const MODULES_DATA: Subject[] = [
-  // 1. Langues & Com
-  { name: "Français 1", category: "Langues & Com", icon: BookOpen, color: "text-orange-400", type: 'module' },
-  { name: "Anglais 1", category: "Langues & Com", icon: Globe, color: "text-yellow-400", type: 'module' },
-  // 2. Sciences Base
-  { name: "Algèbre 1", category: "Sciences Base", icon: Calculator, color: "text-emerald-400", type: 'module' },
-  { name: "Analyse 1", category: "Sciences Base", icon: Hash, color: "text-teal-400", type: 'module' },
-  { name: "Mécanique générale", category: "Sciences Base", icon: Settings, color: "text-slate-400", type: 'module' },
-  // 3. Informatique
-  { name: "Environnement Informatique", category: "Informatique", icon: Layers, color: "text-indigo-400", type: 'module' },
-  { name: "Algorithmique et Programmation C", category: "Informatique", icon: Code, color: "text-purple-400", type: 'module' },
-  // 4. Électronique
-  { name: "Circuits Électriques", category: "Électronique", icon: Zap, color: "text-amber-400", type: 'module' },
-  { name: "Circuits Électroniques", category: "Électronique", icon: Cpu, color: "text-rose-400", type: 'module' },
-  // 5. Fondamentaux GI
-  { name: "Introduction au Génie Industriel", category: "Fondamentaux GI", icon: Factory, color: "text-blue-400", type: 'module' }
-];
-
-const TRANSPORT_MODES = [
-  { id: 'Voiture familiale', icon: Car, label: 'Voiture familiale' },
-  { id: 'Bus public', icon: Bus, label: 'Bus public' },
-  { id: 'Voiture personnelle', icon: Car, label: 'Voiture personnelle' },
-  { id: 'Taxi', icon: MapPin, label: 'Taxi' },
-  { id: 'Moto', icon: Bike, label: 'Moto' }
-];
-
-type DateFilter = 'all' | 'today' | 'week' | 'month';
 
 const App: React.FC = () => {
-  const [step, setStep] = useState<'welcome' | 'form' | 'submitting' | 'thanks' | 'stats' | 'history'>('welcome');
-  const [showQrModal, setShowQrModal] = useState(false);
-  const [qrLoading, setQrLoading] = useState(true);
-  const [showConfirmModal, setShowConfirmModal] = useState(false);
-  const [submittingPhase, setSubmittingPhase] = useState<'analyzing' | 'mailing'>('analyzing');
-  const [submissionProgress, setSubmissionProgress] = useState(0);
-  const [completedSubjects, setCompletedSubjects] = useState<string[]>([]);
-  const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [historySearchQuery, setHistorySearchQuery] = useState('');
+  const [step, setStep] = useState<AppStep>('welcome');
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [adminExpanded, setAdminExpanded] = useState(false);
+  const [adminPass, setAdminPass] = useState('');
+  const [adminTab, setAdminTab] = useState<AdminTab>('historique');
   const [showValidationErrors, setShowValidationErrors] = useState(false);
-  const [selectedSubjectForStats, setSelectedSubjectForStats] = useState<string | null>(null);
-  const [dateFilter, setDateFilter] = useState<DateFilter>('all');
+  const [selectedSubject, setSelectedSubject] = useState<string>('');
+  const [completedSubjects, setCompletedSubjects] = useState<string[]>([]);
+  const [envAuditDone, setEnvAuditDone] = useState(false);
+  const [lastSubmissionId, setLastSubmissionId] = useState('');
+  const [showCopyFeedback, setShowCopyFeedback] = useState(false);
+  
+  // Table state
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterSubject, setFilterSubject] = useState<string>('ALL');
+  const [filterDate, setFilterDate] = useState<string>('');
+  const [sortConfig, setSortConfig] = useState<{ key: SortKey; order: SortOrder }>({ key: 'timestamp', order: 'desc' });
+  
   const [formData, setFormData] = useState<FeedbackData>({
-    subject: '', type: 'module', q1: null, q2: null, q3: null, q4: null, q5: null, q6: null, 
-    q7_salles: null, q7_ressources: null, q7_pc: null, q7_transport: null, comments: ''
+    subject: '',
+    q1: null, q2: null, q3: null, q4: null, q5: null,
+    q6_jobs: null, q7_rooms: null, q8_resources: null, q9_transport: null, q10_laptop: null,
+    comments: ''
   });
 
-  useEffect(() => { setCompletedSubjects(getCompletedSubjectNames()); }, [step]);
+  const backToHub = () => setStep('hub');
+  const isAdminAuthenticated = adminPass === 'admin123';
+  const history = useMemo(() => getHistory(), [sidebarOpen, step]);
 
-  useEffect(() => {
-    if (step === 'submitting') {
-      const interval = setInterval(() => {
-        setSubmissionProgress(prev => {
-          if (submittingPhase === 'analyzing') return prev < 70 ? prev + 1 : prev;
-          return prev < 100 ? prev + 2 : prev;
-        });
-      }, 50);
-      return () => clearInterval(interval);
-    }
-  }, [step, submittingPhase]);
+  const filteredAndSortedHistory = useMemo(() => {
+    let result = [...history];
 
-  const isFormValid = useMemo(() => {
-    if (!formData.subject) return false;
-    if (formData.type === 'global_orientation') return formData.q6 !== null;
-    if (formData.type === 'global_env') {
-      return formData.q7_salles !== null && formData.q7_ressources !== null && 
-             formData.q7_pc !== null && formData.q7_transport !== null;
-    }
-    return formData.q1 !== null && formData.q2 !== null && formData.q3 !== null && formData.q4 !== null && formData.q5 !== null;
-  }, [formData]);
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!isFormValid) { setShowValidationErrors(true); window.scrollTo({ top: 0, behavior: 'smooth' }); return; }
-    setShowConfirmModal(true);
-  };
-
-  const handleConfirmSubmit = async () => {
-    setShowConfirmModal(false); setStep('submitting'); setSubmittingPhase('analyzing');
-    try {
-      const result = await analyzeFeedback(formData);
-      setAnalysisResult(result);
-      saveFeedback(formData);
-      await new Promise(r => setTimeout(r, 1500));
-      setSubmittingPhase('mailing');
-      await sendAnalysisToAdmin(formData, result);
-      setSubmissionProgress(100);
-      await new Promise(r => setTimeout(r, 500));
-      setStep('thanks');
-    } catch { setStep('thanks'); }
-  };
-
-  const resetForm = () => {
-    setFormData({ 
-      subject: '', type: 'module', q1: null, q2: null, q3: null, q4: null, q5: null, q6: null, 
-      q7_salles: null, q7_ressources: null, q7_pc: null, q7_transport: null, comments: '' 
-    });
-    setStep('welcome'); setAnalysisResult(null); setShowValidationErrors(false); setSelectedSubjectForStats(null);
-    setDateFilter('all');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
-  const startNextEvaluation = () => {
-    const all = [...MODULES_DATA, ...GLOBAL_DIAGNOSTICS];
-    const next = all.find(s => !completedSubjects.includes(s.name));
-    if (next) {
-      setFormData({ 
-        ...formData, subject: next.name, type: next.type, 
-        q1: null, q2: null, q3: null, q4: null, q5: null, q6: null, 
-        q7_salles: null, q7_ressources: null, q7_pc: null, q7_transport: null, 
-        comments: '' 
-      });
-      setStep('form'); window.scrollTo({ top: 0, behavior: 'smooth' });
-    } else { resetForm(); }
-  };
-
-  const openStats = (subjectName: string) => {
-    setSelectedSubjectForStats(subjectName);
-    setStep('stats');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
-  const openQrModal = () => {
-    setQrLoading(true);
-    setShowQrModal(true);
-  };
-
-  const totalTasks = GLOBAL_DIAGNOSTICS.length + MODULES_DATA.length;
-  const progress = (completedSubjects.length / totalTasks) * 100;
-  const filteredModules = MODULES_DATA.filter(m => m.name.toLowerCase().includes(searchQuery.toLowerCase()));
-
-  const HistoryListView = () => {
-    const allHistory = getHistory();
-    const thresholdDate = useMemo(() => {
-      if (dateFilter === 'all') return 0;
-      const now = Date.now();
-      const oneDay = 24 * 60 * 60 * 1000;
-      if (dateFilter === 'today') return now - oneDay;
-      if (dateFilter === 'week') return now - (7 * oneDay);
-      if (dateFilter === 'month') return now - (30 * oneDay);
-      return 0;
-    }, [dateFilter]);
-
-    const filteredHistory = useMemo(() => {
-      return allHistory.filter(h => h.timestamp >= thresholdDate);
-    }, [allHistory, thresholdDate]);
-
-    const subjectStats = useMemo(() => {
-      // Fixed: Casting Array.from(new Set(...)) to string[] to resolve 'unknown' type errors for 'name' variable
-      const subjectsInHistory = Array.from(new Set(filteredHistory.map(h => h.subject))) as string[];
-      return subjectsInHistory.map(name => {
-        const stats = getSubjectStats(name); 
-        // Note: Current storageService helper calculates for all time. 
-        // For strict date filtering in list, we'd need a filtered stats helper.
-        return { name, stats };
-      }).filter(s => s.name.toLowerCase().includes(historySearchQuery.toLowerCase()));
-    }, [filteredHistory, historySearchQuery]);
-
-    const globalAvg = useMemo(() => {
-      if (subjectStats.length === 0) return 0;
-      return subjectStats.reduce((acc, curr) => acc + (curr.stats?.averageScore || 0), 0) / subjectStats.length;
-    }, [subjectStats]);
-
-    return (
-      <div className="max-w-5xl mx-auto space-y-10 animate-in fade-in slide-in-from-bottom-8 duration-700 pb-20">
-        <header className="flex flex-col md:flex-row md:items-center justify-between bg-slate-900/40 p-8 rounded-[40px] border-2 border-slate-800/60 backdrop-blur-xl shadow-2xl gap-6">
-          <div className="flex items-center gap-6">
-            <button onClick={() => setStep('welcome')} className="p-4 bg-slate-800/80 hover:bg-slate-700 rounded-2xl border border-slate-700 transition-all shadow-md">
-              <ArrowLeft className="w-5 h-5" />
-            </button>
-            <div>
-              <h3 className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.4em] mb-1">Portail de Diagnostic</h3>
-              <h2 className="text-3xl md:text-4xl font-black text-white uppercase tracking-tighter">Historique Global</h2>
-            </div>
-          </div>
-          
-          <div className="flex flex-wrap items-center gap-2 bg-slate-950/40 p-2 rounded-2xl border border-slate-800">
-             {(['all', 'today', 'week', 'month'] as DateFilter[]).map((f) => (
-              <button
-                key={f}
-                onClick={() => setDateFilter(f)}
-                className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${dateFilter === f ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-800'}`}
-              >
-                {f === 'all' ? 'Total' : f === 'today' ? '24h' : f === 'week' ? '7j' : '30j'}
-              </button>
-            ))}
-          </div>
-        </header>
-
-        <section className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="bg-indigo-600 p-8 rounded-[40px] shadow-2xl relative overflow-hidden group">
-             <div className="absolute top-0 right-0 p-6 opacity-10"><Activity className="w-16 h-16" /></div>
-             <p className="text-[10px] font-black uppercase tracking-widest text-indigo-200 mb-2">Satisfaction Moyenne</p>
-             <h3 className="text-5xl font-black text-white tracking-tighter">{Math.round(globalAvg)}%</h3>
-          </div>
-          <div className="bg-slate-900/40 p-8 rounded-[40px] border border-slate-800 shadow-xl">
-             <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2">Total Feedbacks</p>
-             <h3 className="text-5xl font-black text-white tracking-tighter">{filteredHistory.length}</h3>
-          </div>
-          <div className="bg-slate-900/40 p-8 rounded-[40px] border border-slate-800 shadow-xl">
-             <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2">Matières Évaluées</p>
-             <h3 className="text-5xl font-black text-white tracking-tighter">{subjectStats.length}</h3>
-          </div>
-        </section>
-
-        <section className="bg-slate-900/40 p-10 rounded-[50px] border border-slate-800 space-y-8 shadow-2xl backdrop-blur-md">
-           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
-              <div className="flex items-center gap-3">
-                 <ClipboardList className="w-6 h-6 text-indigo-400" />
-                 <h4 className="font-black uppercase text-sm tracking-[0.2em] text-white">Récapitulatif par Matière</h4>
-              </div>
-              <div className="relative w-full sm:w-64">
-                <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-                <input type="text" placeholder="Filtrer..." value={historySearchQuery} onChange={(e)=>setHistorySearchQuery(e.target.value)} className="w-full bg-slate-950/40 border border-slate-800 rounded-full py-2.5 pl-12 pr-6 text-xs outline-none focus:border-indigo-500 transition-all shadow-inner text-white" />
-              </div>
-           </div>
-
-           <div className="grid grid-cols-1 gap-4">
-              {subjectStats.map(({ name, stats }) => (
-                <button 
-                  key={name} 
-                  onClick={() => openStats(name)}
-                  className="flex flex-col sm:flex-row sm:items-center justify-between p-6 bg-slate-950/30 hover:bg-indigo-900/10 border border-slate-800 hover:border-indigo-500/30 rounded-3xl transition-all group"
-                >
-                  <div className="flex items-center gap-4 text-left">
-                     <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 group-hover:bg-indigo-600 transition-colors">
-                        <History className="w-5 h-5 text-indigo-400 group-hover:text-white" />
-                     </div>
-                     <div>
-                        <h5 className="font-black text-white uppercase tracking-tight text-sm">{name}</h5>
-                        <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">{stats?.totalEntries} feedbacks enregistrés</p>
-                     </div>
-                  </div>
-                  <div className="flex items-center gap-8 mt-4 sm:mt-0">
-                     <div className="text-right">
-                        <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">Indice</p>
-                        <p className={`text-xl font-black tabular-nums ${stats && stats.averageScore > 75 ? 'text-emerald-400' : 'text-indigo-400'}`}>{Math.round(stats?.averageScore || 0)}%</p>
-                     </div>
-                     <ChevronRight className="w-5 h-5 text-slate-700 group-hover:text-white transition-all transform group-hover:translate-x-1" />
-                  </div>
-                </button>
-              ))}
-              {subjectStats.length === 0 && (
-                <div className="py-20 text-center text-slate-600 border-2 border-dashed border-slate-800 rounded-[40px]">
-                   <Info className="w-12 h-12 mx-auto mb-4 opacity-20" />
-                   <p className="font-black uppercase text-[10px] tracking-[0.3em]">Aucun feedback trouvé pour ces critères</p>
-                </div>
-              )}
-           </div>
-        </section>
-
-        <button onClick={() => setStep('welcome')} className="w-full py-8 bg-slate-800/40 hover:bg-slate-700/60 backdrop-blur-md rounded-[30px] border border-slate-700/60 font-black text-lg uppercase tracking-widest transition-all shadow-xl hover:-translate-y-1 flex items-center justify-center gap-4">
-          <ArrowLeft className="w-6 h-6" /> RETOUR AU MENU PRINCIPAL
-        </button>
-      </div>
-    );
-  };
-
-  const StatsView = () => {
-    if (!selectedSubjectForStats) return null;
-    
-    // Get full history for the subject
-    const rawHistory = getSubjectHistory(selectedSubjectForStats);
-    
-    // Filter history based on selected date filter
-    const filteredHistory = useMemo(() => {
-      if (dateFilter === 'all') return rawHistory;
-      const now = Date.now();
-      const oneDay = 24 * 60 * 60 * 1000;
-      let threshold = 0;
-      
-      if (dateFilter === 'today') threshold = now - oneDay;
-      else if (dateFilter === 'week') threshold = now - (7 * oneDay);
-      else if (dateFilter === 'month') threshold = now - (30 * oneDay);
-      
-      return rawHistory.filter(entry => entry.timestamp >= threshold);
-    }, [rawHistory, dateFilter]);
-
-    // Recalculate stats manually based on filtered entries
-    const stats = useMemo(() => {
-      if (filteredHistory.length === 0) return null;
-
-      const type = filteredHistory[0].type;
-      const sums = filteredHistory.reduce(
-        (acc, curr) => ({
-          q1: acc.q1 + (curr.q1 || 0),
-          q2: acc.q2 + (curr.q2 || 0),
-          q3: acc.q3 + (curr.q3 || 0),
-          q4: acc.q4 + (curr.q4 || 0),
-          q5: acc.q5 + (curr.q5 || 0),
-          q6: acc.q6 + (curr.q6 || 0),
-          q7_salles: acc.q7_salles + (curr.q7_salles || 0),
-          q7_ressources: acc.q7_ressources + (curr.q7_ressources || 0),
-          q7_pc: acc.q7_pc + (curr.q7_pc || 0),
-        }),
-        { q1: 0, q2: 0, q3: 0, q4: 0, q5: 0, q6: 0, q7_salles: 0, q7_ressources: 0, q7_pc: 0 }
+    // Text Search
+    if (searchTerm) {
+      result = result.filter(entry => 
+        entry.subject.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        entry.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        entry.comments.toLowerCase().includes(searchTerm.toLowerCase())
       );
+    }
 
-      const count = filteredHistory.length;
-      const qAverages = {
-        q1: sums.q1 / count,
-        q2: sums.q2 / count,
-        q3: sums.q3 / count,
-        q4: sums.q4 / count,
-        q5: sums.q5 / count,
-        q6: sums.q6 / count,
-        q7_salles: sums.q7_salles / count,
-        q7_ressources: sums.q7_ressources / count,
-        q7_pc: sums.q7_pc / count,
-      };
+    // Subject Filter
+    if (filterSubject !== 'ALL') {
+      result = result.filter(entry => entry.subject === filterSubject);
+    }
 
-      let relevantScores = [];
-      if (type === 'module') {
-        relevantScores = [qAverages.q1, qAverages.q2, qAverages.q3, qAverages.q4, qAverages.q5];
-      } else if (type === 'global_orientation') {
-        relevantScores = [qAverages.q6];
-      } else if (type === 'global_env') {
-        relevantScores = [qAverages.q7_salles, qAverages.q7_ressources, qAverages.q7_pc];
+    // Date Filter
+    if (filterDate) {
+      const [fYear, fMonth, fDay] = filterDate.split('-');
+      const targetDateStr = `${fDay}/${fMonth}/${fYear}`;
+      result = result.filter(entry => entry.timestamp.startsWith(targetDateStr));
+    }
+
+    result.sort((a, b) => {
+      let valA: any = a[sortConfig.key === 'score' ? 'q1' : sortConfig.key] || 0;
+      let valB: any = b[sortConfig.key === 'score' ? 'q1' : sortConfig.key] || 0;
+      
+      if (sortConfig.key === 'score') {
+        valA = ((a.q1||0) + (a.q2||0) + (a.q3||0) + (a.q4||0) + (a.q5||0)) / 5;
+        valB = ((b.q1||0) + (b.q2||0) + (b.q3||0) + (b.q4||0) + (b.q5||0)) / 5;
       }
 
-      const averageScore = relevantScores.reduce((a, b) => a + b, 0) / (relevantScores.length || 1);
+      if (valA < valB) return sortConfig.order === 'asc' ? -1 : 1;
+      if (valA > valB) return sortConfig.order === 'asc' ? 1 : -1;
+      return 0;
+    });
 
-      return {
-        averageScore,
-        totalEntries: count,
-        qAverages
-      };
-    }, [filteredHistory]);
+    return result;
+  }, [history, searchTerm, filterSubject, filterDate, sortConfig]);
 
-    if (!stats && dateFilter === 'all') return (
-      <div className="max-w-xl mx-auto py-20 text-center animate-in fade-in zoom-in duration-500">
-        <div className="p-8 bg-slate-900/60 backdrop-blur-md rounded-[40px] border border-slate-800 space-y-6">
-          <History className="w-16 h-16 text-slate-600 mx-auto" />
-          <h2 className="text-2xl font-black text-white uppercase">Aucune donnée</h2>
-          <p className="text-slate-400">Il n'y a pas encore d'historique pour {selectedSubjectForStats}.</p>
-          <button onClick={() => setStep('history')} className="px-8 py-3 bg-indigo-600 rounded-2xl font-black uppercase text-xs transition-all shadow-lg shadow-indigo-900/20">Retour à l'historique</button>
-        </div>
-      </div>
-    );
+  // View specific stats (for the table tab)
+  const viewStats = useMemo(() => {
+    const total = filteredAndSortedHistory.length;
+    const subjects = new Set(filteredAndSortedHistory.map(e => e.subject));
+    
+    const pedagogyEntries = filteredAndSortedHistory.filter(e => e.subject !== 'ENVIRONNEMENT_GLOBAL');
+    const average = pedagogyEntries.length 
+      ? Math.round(pedagogyEntries.reduce((acc, e) => acc + ((e.q1||0)+(e.q2||0)+(e.q3||0)+(e.q4||0)+(e.q5||0))/5, 0) / pedagogyEntries.length)
+      : 0;
 
-    const scoreColor = stats ? (stats.averageScore >= 75 ? 'text-emerald-400' : stats.averageScore >= 50 ? 'text-indigo-400' : 'text-rose-400') : 'text-slate-600';
-    const scoreBg = stats ? (stats.averageScore >= 75 ? 'bg-emerald-500/10' : stats.averageScore >= 50 ? 'bg-indigo-500/10' : 'bg-rose-500/10') : 'bg-slate-900';
-    const scoreBorder = stats ? (stats.averageScore >= 75 ? 'border-emerald-500/30' : stats.averageScore >= 50 ? 'border-indigo-500/30' : 'border-rose-500/30') : 'border-slate-800';
+    return { total, subjectCount: subjects.size, average };
+  }, [filteredAndSortedHistory]);
 
-    return (
-      <div className="max-w-4xl mx-auto space-y-10 animate-in fade-in slide-in-from-bottom-8 duration-700 pb-20">
-        <header className="flex flex-col md:flex-row md:items-center justify-between bg-slate-900/40 p-8 rounded-[40px] border-2 border-slate-800/60 backdrop-blur-xl shadow-2xl gap-6">
-          <div className="flex items-center gap-6">
-            <button onClick={() => setStep('history')} className="p-4 bg-slate-800/80 hover:bg-slate-700 rounded-2xl border border-slate-700 transition-all shadow-md">
-              <ArrowLeft className="w-5 h-5" />
-            </button>
-            <div>
-              <h3 className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.4em] mb-1">Rapport de Performance</h3>
-              <h2 className="text-3xl md:text-4xl font-black text-white uppercase tracking-tighter">{selectedSubjectForStats}</h2>
-            </div>
-          </div>
-          
-          <div className="flex flex-wrap items-center gap-2 bg-slate-950/40 p-2 rounded-2xl border border-slate-800">
-            {(['all', 'today', 'week', 'month'] as DateFilter[]).map((f) => (
-              <button
-                key={f}
-                onClick={() => setDateFilter(f)}
-                className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${dateFilter === f ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-800'}`}
-              >
-                {f === 'all' ? 'Total' : f === 'today' ? '24h' : f === 'week' ? '7j' : '30j'}
-              </button>
-            ))}
-          </div>
-        </header>
+  const adminStats = useMemo(() => {
+    const total = history.length;
+    if (total === 0) return { total, average: 0, bySubject: [] };
+    
+    const validHistory = history.filter(e => e.subject !== 'ENVIRONNEMENT_GLOBAL');
+    const sum = validHistory.reduce((acc, entry) => {
+      const entrySum = (entry.q1 || 0) + (entry.q2 || 0) + (entry.q3 || 0) + (entry.q4 || 0) + (entry.q5 || 0);
+      return acc + (entrySum / 5);
+    }, 0);
 
-        {stats ? (
-          <>
-            <section className={`relative overflow-hidden p-16 rounded-[60px] border-2 ${scoreBorder} ${scoreBg} text-center shadow-3xl backdrop-blur-md`}>
-              <div className="absolute top-0 right-0 p-12 opacity-5 pointer-events-none">
-                <TrendingUp className="w-64 h-64" />
-              </div>
-              <p className="text-[12px] font-black uppercase tracking-[0.5em] text-slate-400 mb-6">Indice de Satisfaction {dateFilter !== 'all' && '(Période)'}</p>
-              <div className="relative inline-block">
-                 <div className="text-[120px] md:text-[160px] font-black leading-none tracking-tighter tabular-nums flex items-baseline justify-center">
-                    <span className={scoreColor}>{Math.round(stats.averageScore as number)}</span>
-                    <span className="text-4xl md:text-6xl text-slate-500 ml-2">%</span>
-                 </div>
-                 <svg className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[110%] h-[110%] -rotate-90 pointer-events-none" viewBox="0 0 100 100">
-                    <circle cx="50" cy="50" r="48" fill="none" stroke="currentColor" strokeWidth="1" className="text-slate-800 opacity-30" />
-                    <circle cx="50" cy="50" r="48" fill="none" stroke="currentColor" strokeWidth="2.5" strokeDasharray="301.59" strokeDashoffset={301.59 - (301.59 * stats.averageScore / 100)} className={`${scoreColor} transition-all duration-1000 ease-out`} />
-                 </svg>
-              </div>
-              <div className="mt-12 flex justify-center gap-12">
-                 <div className="flex flex-col">
-                    <span className="text-[10px] font-black uppercase text-slate-500 mb-1">Impact</span>
-                    <span className={`text-lg font-black ${scoreColor}`}>{stats.averageScore > 80 ? 'EXCELLENT' : stats.averageScore > 60 ? 'POSITIF' : 'À AMÉLIORER'}</span>
-                 </div>
-                 <div className="w-px h-10 bg-slate-800"></div>
-                 <div className="flex flex-col">
-                    <span className="text-[10px] font-black uppercase text-slate-500 mb-1">Volume</span>
-                    <span className="text-lg font-black text-white">{stats.totalEntries} <span className="text-[10px] text-slate-500">ENTRÉES</span></span>
-                 </div>
-              </div>
-            </section>
+    const bySubject = GI_SUBJECTS.map(s => ({
+      name: s,
+      stats: getSubjectStats(s)
+    })).filter(item => item.stats !== null);
+    
+    return { 
+      total, 
+      average: validHistory.length ? Math.round(sum / validHistory.length) : 0, 
+      bySubject 
+    };
+  }, [history]);
 
-            <section className="grid grid-cols-1 md:grid-cols-2 gap-8">
-               <div className="bg-slate-900/40 p-10 rounded-[40px] border border-slate-800 space-y-8 shadow-lg backdrop-blur-md">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                       <BarChart3 className="w-5 h-5 text-indigo-500" />
-                       <h4 className="font-black uppercase text-sm tracking-widest text-white">Détails des Scores</h4>
-                    </div>
-                  </div>
-                  <div className="space-y-6">
-                     {Object.entries(stats.qAverages).map(([key, val]) => {
-                        const value = val as number;
-                        if (value === 0 && key !== 'q7_pc') return null;
-                        let label = "";
-                        if(key === 'q1') label = "Clarté des Objectifs";
-                        if(key === 'q2') label = "Qualité des Échanges";
-                        if(key === 'q3') label = "Disponibilité Tutorat";
-                        if(key === 'q4') label = "Qualité des Supports";
-                        if(key === 'q5') label = "Équité de l'Évaluation";
-                        if(key === 'q6') label = "Projection Métiers";
-                        if(key === 'q7_salles') label = "Équipements Salles";
-                        if(key === 'q7_ressources') label = "Ressources Numériques";
-                        if(!label) return null;
-                        
-                        return (
-                          <div key={key} className="space-y-3">
-                             <div className="flex justify-between items-end">
-                                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wide">{label}</span>
-                                <span className="text-sm font-black text-white tabular-nums">{Math.round(value)}%</span>
-                             </div>
-                             <div className="h-2.5 bg-slate-800/50 rounded-full overflow-hidden border border-slate-800">
-                                <div className="h-full bg-indigo-500 rounded-full transition-all duration-1000 shadow-[0_0_10px_rgba(99,102,241,0.3)]" style={{ width: `${value}%` }}></div>
-                             </div>
-                          </div>
-                        );
-                     })}
-                  </div>
-               </div>
+  const progressStats = useMemo(() => {
+    if (step === 'form_pedagogy') {
+      const fields = [formData.q1, formData.q2, formData.q3, formData.q4, formData.q5];
+      const completed = fields.filter(v => v !== null).length;
+      return { percentage: Math.round((completed / 5) * 100), completed, total: 5 };
+    }
+    if (step === 'form_env') {
+      const fields = [formData.q6_jobs, formData.q7_rooms, formData.q8_resources, formData.q9_transport, formData.q10_laptop];
+      const completed = fields.filter(v => v !== null).length;
+      return { percentage: Math.round((completed / 5) * 100), completed, total: 5 };
+    }
+    return { percentage: 0, completed: 0, total: 0 };
+  }, [formData, step]);
 
-               <div className="bg-slate-900/40 p-10 rounded-[40px] border border-slate-800 space-y-8 flex flex-col shadow-lg backdrop-blur-md">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                       <MessageCircle className="w-5 h-5 text-indigo-500" />
-                       <h4 className="font-black uppercase text-sm tracking-widest text-white">Journal des retours</h4>
-                    </div>
-                  </div>
-                  <div className="flex-1 space-y-4 overflow-y-auto max-h-[400px] pr-4 custom-scrollbar">
-                     {filteredHistory.map((entry, idx) => (
-                        entry.comments && (
-                          <div key={idx} className="bg-slate-950/30 p-6 rounded-3xl border border-slate-800/50 italic text-slate-300 text-sm leading-relaxed relative hover:border-indigo-500/30 transition-all">
-                             <div className="absolute -top-2 -left-2 p-2 bg-slate-900 rounded-full border border-slate-800 shadow-md">
-                                <MessageSquareText className="w-3 h-3 text-indigo-500" />
-                             </div>
-                             "{entry.comments}"
-                             <div className="mt-4 text-[9px] font-black uppercase text-slate-500 non-italic flex items-center justify-between">
-                                <span className="flex items-center gap-1"><Users className="w-2 h-2" /> Anonyme</span>
-                                <span>{new Date(entry.timestamp).toLocaleDateString()}</span>
-                             </div>
-                          </div>
-                        )
-                     ))}
-                     {!filteredHistory.some(h => h.comments) && (
-                       <div className="h-full flex flex-col items-center justify-center text-slate-600 text-center py-20 opacity-50">
-                          <MessageCircle className="w-16 h-16 mb-4" />
-                          <p className="text-xs font-black uppercase tracking-widest">Aucun commentaire sur cette période</p>
-                       </div>
-                     )}
-                  </div>
-               </div>
-            </section>
-          </>
-        ) : (
-          <div className="bg-slate-900/40 p-20 rounded-[40px] border border-slate-800 text-center shadow-lg">
-            <Filter className="w-16 h-16 text-slate-700 mx-auto mb-6" />
-            <h3 className="text-2xl font-black text-white uppercase mb-2">Aucun résultat trouvé</h3>
-            <p className="text-slate-500">Essayez de modifier les filtres pour afficher des données sur cette période.</p>
-            <button onClick={() => setDateFilter('all')} className="mt-8 px-6 py-3 bg-slate-800 rounded-xl font-black uppercase text-[10px] tracking-widest hover:bg-slate-700 transition-all">Afficher tout l'historique</button>
-          </div>
-        )}
+  const firstUncompletedSubject = useMemo(() => {
+    return GI_SUBJECTS.find(s => !completedSubjects.includes(s));
+  }, [completedSubjects]);
 
-        <button onClick={() => setStep('history')} className="w-full py-8 bg-slate-800/40 hover:bg-slate-700/60 backdrop-blur-md rounded-[30px] border border-slate-700/60 font-black text-lg uppercase tracking-widest transition-all shadow-xl hover:-translate-y-1 flex items-center justify-center gap-4">
-          <ArrowLeft className="w-6 h-6" /> RETOUR À L'HISTORIQUE
-        </button>
-      </div>
-    );
+  const startPedagogy = (subject: string) => {
+    setSelectedSubject(subject);
+    setFormData({
+      subject,
+      q1: null, q2: null, q3: null, q4: null, q5: null,
+      q6_jobs: null, q7_rooms: null, q8_resources: null, q9_transport: null, q10_laptop: null,
+      comments: ''
+    });
+    setStep('form_pedagogy');
+    setShowValidationErrors(false);
+  };
+
+  const startEnvAudit = () => {
+    setFormData({
+      subject: 'ENVIRONNEMENT_GLOBAL',
+      q1: null, q2: null, q3: null, q4: null, q5: null,
+      q6_jobs: null, q7_rooms: null, q8_resources: null, q9_transport: null, q10_laptop: null,
+      comments: ''
+    });
+    setStep('form_env');
+    setShowValidationErrors(false);
+  };
+
+  const handleFormSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (progressStats.completed < progressStats.total) {
+      setShowValidationErrors(true);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    
+    setStep('submitting');
+    
+    try {
+      const id = saveFeedback(formData);
+      setLastSubmissionId(id);
+      const analysis = await analyzeFeedback(formData);
+      await sendAnalysisToAdmin(formData, analysis);
+
+      if (step === 'form_pedagogy') {
+        setCompletedSubjects(prev => [...prev, formData.subject]);
+      } else {
+        setEnvAuditDone(true);
+      }
+      setStep('thanks');
+    } catch (error) {
+      console.error("Échec de la transmission IA/Email", error);
+      setStep('thanks');
+    }
+  };
+
+  const copyToClipboard = () => {
+    if (lastSubmissionId) {
+      navigator.clipboard.writeText(lastSubmissionId);
+      setShowCopyFeedback(true);
+      setTimeout(() => setShowCopyFeedback(false), 2000);
+    }
+  };
+
+  const toggleSort = (key: SortKey) => {
+    setSortConfig(prev => ({
+      key,
+      order: prev.key === key && prev.order === 'desc' ? 'asc' : 'desc'
+    }));
+  };
+
+  const resetAll = () => {
+    setCompletedSubjects([]);
+    setEnvAuditDone(false);
+    setStep('welcome');
   };
 
   return (
-    <div className="min-h-screen industrial-pattern text-slate-100 pb-20 selection:bg-indigo-500/30">
-      <header className="bg-slate-900/40 backdrop-blur-xl border-b border-slate-800/50 sticky top-0 z-50 h-16 flex items-center">
-        <div className="max-w-6xl mx-auto px-6 w-full flex items-center justify-between">
-          <div className="flex items-center gap-3 cursor-pointer" onClick={resetForm}>
-            <div className="p-1.5 bg-indigo-600 rounded-lg shadow-lg"><Factory className="text-white w-5 h-5" /></div>
-            <h1 className="font-black text-lg tracking-tighter uppercase">GI <span className="text-indigo-400">FEEDBACK</span></h1>
+    <div className="min-h-screen industrial-pattern text-slate-100 selection:bg-indigo-500/30">
+      {/* Sidebar Admin */}
+      <div className={`fixed inset-y-0 left-0 z-[100] bg-slate-950 border-r border-slate-900 transform transition-all duration-500 shadow-2xl flex flex-col ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} ${adminExpanded ? 'w-full md:w-4/5 lg:w-3/4' : 'w-80'}`}>
+        <div className="p-6 flex items-center justify-between border-b border-slate-900">
+          <div className="flex items-center gap-2">
+            {isAdminAuthenticated ? <ShieldCheck className="w-5 h-5 text-emerald-400" /> : <ShieldAlert className="w-5 h-5 text-indigo-400" />}
+            <h3 className="font-black text-[10px] uppercase tracking-[0.25em] text-white">Console Qualité</h3>
           </div>
-          <div className="flex items-center gap-4">
-            <button onClick={() => setStep('history')} className="hidden sm:flex items-center gap-2 px-4 py-2 bg-slate-800/60 hover:bg-slate-700 rounded-xl border border-slate-700 transition-all shadow-md">
-              <LayoutDashboard className="w-4 h-4 text-indigo-400" />
-              <span className="text-[10px] font-black uppercase tracking-widest">Dashboard</span>
-            </button>
-            <div className="hidden sm:flex flex-col items-end gap-1">
-              <span className="text-[9px] font-black uppercase tracking-widest text-slate-500 leading-none">Progression {completedSubjects.length}/{totalTasks}</span>
-              <div className="w-32 h-1.5 bg-slate-800 rounded-full overflow-hidden border border-slate-700">
-                <div className="h-full bg-indigo-500 transition-all duration-700" style={{ width: `${progress}%` }}></div>
+          <div className="flex items-center gap-2">
+            {isAdminAuthenticated && (
+              <button 
+                onClick={() => setAdminExpanded(!adminExpanded)}
+                className="p-2 hover:bg-slate-900 rounded-xl transition-colors text-slate-500"
+                title={adminExpanded ? "Réduire" : "Agrandir"}
+              >
+                {adminExpanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+              </button>
+            )}
+            <button onClick={() => { setSidebarOpen(false); setAdminExpanded(false); }} className="p-2 hover:bg-slate-900 rounded-xl transition-colors"><X className="w-5 h-5 text-slate-500" /></button>
+          </div>
+        </div>
+        
+        <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
+          {!isAdminAuthenticated ? (
+            <div className="space-y-6 animate-in fade-in slide-in-from-top-4 duration-500">
+              <div className="bg-slate-900/50 border border-slate-800 p-8 rounded-[32px] text-center space-y-6">
+                <div className="w-16 h-16 bg-indigo-500/10 rounded-2xl flex items-center justify-center mx-auto">
+                  <Lock className="w-8 h-8 text-indigo-400" />
+                </div>
+                <div className="space-y-2">
+                  <h4 className="text-sm font-black uppercase tracking-widest text-white">Zone Sécurisée</h4>
+                  <p className="text-[10px] font-bold text-slate-500 uppercase tracking-tight">Veuillez entrer le code d'accès administrateur</p>
+                </div>
+                <div className="space-y-3">
+                  <input 
+                    type="password" 
+                    autoFocus
+                    value={adminPass} 
+                    onChange={(e) => setAdminPass(e.target.value)} 
+                    placeholder="CODE..." 
+                    className="w-full bg-slate-950 border border-slate-800 rounded-2xl px-4 py-4 text-center text-lg font-mono tracking-[0.5em] focus:border-indigo-500 outline-none text-indigo-400 transition-all placeholder:tracking-normal placeholder:text-slate-800" 
+                  />
+                  {adminPass.length > 0 && adminPass !== 'admin123' && (
+                    <p className="text-[9px] font-black text-red-500 uppercase tracking-widest animate-pulse">Authentification échouée</p>
+                  )}
+                </div>
               </div>
             </div>
-            <button onClick={openQrModal} className="p-2 bg-slate-800/60 hover:bg-slate-700 rounded-xl border border-slate-700 transition-all shadow-md"><QrCode className="w-4 h-4 text-indigo-400" /></button>
+          ) : (
+            <div className="space-y-6 animate-in fade-in duration-500">
+              <div className="flex bg-slate-900 p-1 rounded-xl gap-1">
+                <button onClick={() => setAdminTab('historique')} className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${adminTab === 'historique' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}>
+                  <History className="w-3 h-3" /> Historique
+                </button>
+                <button onClick={() => setAdminTab('stats_details')} className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${adminTab === 'stats_details' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}>
+                  <BarChart3 className="w-3 h-3" /> Modules
+                </button>
+                <button onClick={() => setAdminTab('table')} className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all ${adminTab === 'table' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-300'}`}>
+                  <TableIcon className="w-3 h-3" /> Tableau
+                </button>
+              </div>
+
+              {adminTab === 'historique' && (
+                <div className="animate-in fade-in duration-300 space-y-6">
+                  <div className="space-y-4">
+                    <div className="bg-slate-900 border-2 border-slate-800 p-6 rounded-[28px] relative overflow-hidden group hover:border-indigo-500/50 transition-all shadow-xl">
+                      <div className="absolute -right-4 -top-4 opacity-5 group-hover:rotate-12 group-hover:scale-110 transition-transform">
+                        <Users size={80} className="text-indigo-400" />
+                      </div>
+                      <div className="relative z-10">
+                        <div className="flex items-center gap-3 mb-4">
+                          <div className="p-2.5 bg-indigo-500/10 rounded-xl">
+                            <Hash className="w-5 h-5 text-indigo-400" />
+                          </div>
+                          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">Volume d'Enquêtes</p>
+                        </div>
+                        <div className="flex items-baseline gap-2">
+                          <p className="text-5xl font-black text-white">{adminStats.total}</p>
+                          <span className="text-[10px] font-black text-emerald-400 bg-emerald-400/10 px-2 py-0.5 rounded-full">+ En temps réel</span>
+                        </div>
+                        <p className="text-[9px] text-slate-600 font-bold uppercase mt-2 tracking-widest">Total des audits enregistrés</p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="bg-slate-900 border border-slate-800 p-5 rounded-[24px] group hover:border-amber-500/50 transition-all">
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="p-2 bg-amber-500/10 rounded-lg">
+                            <BookOpen className="w-4 h-4 text-amber-500" />
+                          </div>
+                          <span className="text-2xl font-black text-white">{adminStats.bySubject.length}</span>
+                        </div>
+                        <p className="text-[9px] font-black uppercase tracking-widest text-slate-500">Matières Audités</p>
+                      </div>
+
+                      <div className="bg-slate-900 border border-slate-800 p-5 rounded-[24px] group hover:border-emerald-500/50 transition-all">
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="p-2 bg-emerald-500/10 rounded-lg">
+                            <TrendingUp className="w-4 h-4 text-emerald-400" />
+                          </div>
+                          <span className="text-2xl font-black text-white">{adminStats.average}%</span>
+                        </div>
+                        <p className="text-[9px] font-black uppercase tracking-widest text-slate-500">Qualité Globale</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <button onClick={() => downloadHistoryCSV()} className="w-full flex items-center justify-center gap-3 bg-white text-slate-950 py-4 rounded-2xl font-black text-[9px] uppercase tracking-[0.2em] hover:bg-indigo-50 hover:shadow-lg hover:shadow-indigo-500/10 transition-all">
+                    <TableIcon className="w-4 h-4" /> Exporter Historique Complet
+                  </button>
+
+                  <div className="space-y-3 pt-4 border-t border-slate-900">
+                    <p className="text-[9px] font-black uppercase tracking-widest text-slate-600 flex items-center gap-2 mb-4">
+                      <Zap className="w-3 h-3 text-indigo-400" /> Flux d'enquêtes récent
+                    </p>
+                    {history.length === 0 ? (
+                      <div className="text-center py-20 text-slate-600 bg-slate-900/50 rounded-3xl border border-dashed border-slate-800">
+                        <History className="w-10 h-10 mx-auto mb-4 opacity-20" />
+                        <p className="text-[10px] font-bold uppercase tracking-widest">Aucune donnée archivée</p>
+                      </div>
+                    ) : (
+                      history.map((entry) => {
+                        const avg = entry.subject === 'ENVIRONNEMENT_GLOBAL' ? null : Math.round(((entry.q1||0) + (entry.q2||0) + (entry.q3||0) + (entry.q4||0) + (entry.q5||0)) / 5);
+                        return (
+                          <div key={entry.id} className="bg-slate-900/50 border border-slate-800 p-4 rounded-2xl hover:border-indigo-500/30 hover:bg-slate-900 transition-all cursor-default group relative overflow-hidden">
+                            {avg !== null && (
+                              <div className={`absolute top-0 right-0 w-1.5 h-full ${avg >= 75 ? 'bg-emerald-500' : avg >= 50 ? 'bg-indigo-500' : 'bg-red-500'} opacity-50`}></div>
+                            )}
+                            <div className="flex justify-between items-start mb-2 pr-2">
+                              <div>
+                                <p className="text-xs font-black text-white leading-tight uppercase tracking-tighter">
+                                  {entry.subject === 'ENVIRONNEMENT_GLOBAL' ? '🌍 ENVIRONNEMENT' : entry.subject}
+                                </p>
+                                <p className="text-[8px] text-slate-500 font-bold uppercase tracking-widest flex items-center gap-1 mt-0.5">
+                                  <Calendar className="w-2 h-2" /> {entry.timestamp}
+                                </p>
+                              </div>
+                              <span className="text-[8px] font-mono text-indigo-400/80">#{entry.id}</span>
+                            </div>
+                            {avg !== null && (
+                              <div className="flex items-center gap-3 mt-3">
+                                <div className="flex-1 h-1 bg-slate-950 rounded-full overflow-hidden">
+                                  <div className={`h-full transition-all duration-1000 ${avg >= 75 ? 'bg-emerald-500' : avg >= 50 ? 'bg-indigo-500' : 'bg-red-500'}`} style={{ width: `${avg}%` }}></div>
+                                </div>
+                                <span className={`text-[10px] font-black ${avg >= 75 ? 'text-emerald-400' : avg >= 50 ? 'text-indigo-400' : 'text-red-400'}`}>{avg}%</span>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {adminTab === 'stats_details' && (
+                <div className="animate-in fade-in duration-300 space-y-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-[9px] font-black uppercase tracking-widest text-slate-500">Performances par Module</p>
+                    <button 
+                      onClick={() => downloadAggregatedStatsCSV(GI_SUBJECTS)} 
+                      className="flex items-center gap-2 text-[9px] font-black uppercase tracking-widest text-indigo-400 hover:text-indigo-300 transition-colors bg-indigo-500/5 px-3 py-1.5 rounded-lg border border-indigo-500/10"
+                    >
+                      <Download className="w-3 h-3" /> Export CSV
+                    </button>
+                  </div>
+                  {adminStats.bySubject.length === 0 ? (
+                    <div className="text-center py-20 text-slate-600 bg-slate-900/50 rounded-3xl border border-dashed border-slate-800">
+                      <BarChart3 className="w-10 h-10 mx-auto mb-4 opacity-20" />
+                      <p className="text-[10px] font-bold uppercase tracking-widest">Aucune donnée par matière</p>
+                    </div>
+                  ) : (
+                    adminStats.bySubject.map((item, idx) => (
+                      <div key={idx} className="bg-slate-900 border border-slate-800 p-5 rounded-2xl hover:border-indigo-500/30 transition-all">
+                        <div className="flex justify-between items-center mb-4">
+                          <h4 className="text-xs font-black text-white uppercase tracking-tight">{item.name}</h4>
+                          <span className="text-[10px] font-black text-indigo-400">{Math.round(item.stats.averageScore)}%</span>
+                        </div>
+                        <div className="space-y-2">
+                           <div className="flex justify-between text-[8px] font-bold uppercase text-slate-500 tracking-widest">
+                             <span>Réponses : {item.stats.totalEntries}</span>
+                             <span>Qualité : {Math.round(item.stats.averageScore)}%</span>
+                           </div>
+                           <div className="h-1.5 bg-slate-950 rounded-full overflow-hidden">
+                             <div className="h-full bg-indigo-500 transition-all duration-1000" style={{ width: `${item.stats.averageScore}%` }}></div>
+                           </div>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+
+              {adminTab === 'table' && (
+                <div className="animate-in fade-in slide-in-from-top-4 duration-500 space-y-6">
+                  {/* KPI Cards Section */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="bg-slate-900 border-2 border-slate-800 p-6 rounded-[32px] relative overflow-hidden group hover:border-indigo-500/50 transition-all shadow-xl">
+                      <div className="absolute -right-4 -bottom-4 opacity-[0.05] group-hover:scale-125 group-hover:rotate-12 transition-transform duration-700">
+                        <Activity size={90} className="text-indigo-400" />
+                      </div>
+                      <div className="relative z-10 flex flex-col h-full">
+                        <div className="flex items-center gap-2.5 mb-3">
+                          <div className="p-2 bg-indigo-500/10 rounded-xl">
+                            <BarChart className="w-4 h-4 text-indigo-400" />
+                          </div>
+                          <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">Volume Audité</span>
+                        </div>
+                        <div className="flex items-baseline gap-2 mt-auto">
+                          <p className="text-4xl font-black text-white">{viewStats.total}</p>
+                          <span className="text-[9px] font-bold text-slate-600 uppercase">Enquêtes</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="bg-slate-900 border-2 border-slate-800 p-6 rounded-[32px] relative overflow-hidden group hover:border-amber-500/50 transition-all shadow-xl">
+                      <div className="absolute -right-4 -bottom-4 opacity-[0.05] group-hover:scale-125 group-hover:-rotate-12 transition-transform duration-700">
+                        <BookOpen size={90} className="text-amber-400" />
+                      </div>
+                      <div className="relative z-10 flex flex-col h-full">
+                        <div className="flex items-center gap-2.5 mb-3">
+                          <div className="p-2 bg-amber-500/10 rounded-xl">
+                            <PieChart className="w-4 h-4 text-amber-400" />
+                          </div>
+                          <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">Diversité Modules</span>
+                        </div>
+                        <div className="flex items-baseline gap-2 mt-auto">
+                          <p className="text-4xl font-black text-white">{viewStats.subjectCount}</p>
+                          <span className="text-[9px] font-bold text-slate-600 uppercase">Matières</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="bg-slate-900 border-2 border-slate-800 p-6 rounded-[32px] relative overflow-hidden group hover:border-emerald-500/50 transition-all shadow-xl">
+                      <div className="absolute -right-4 -bottom-4 opacity-[0.05] group-hover:scale-125 transition-transform duration-700">
+                        <Target size={90} className="text-emerald-400" />
+                      </div>
+                      <div className="relative z-10 flex flex-col h-full">
+                        <div className="flex items-center gap-2.5 mb-3">
+                          <div className="p-2 bg-emerald-500/10 rounded-xl">
+                            <TrendingUp className="w-4 h-4 text-emerald-400" />
+                          </div>
+                          <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">Qualité Moyenne</span>
+                        </div>
+                        <div className="flex items-baseline gap-2 mt-auto">
+                          <p className={`text-4xl font-black ${viewStats.average >= 75 ? 'text-emerald-400' : viewStats.average >= 50 ? 'text-indigo-400' : 'text-red-400'}`}>
+                            {viewStats.average}%
+                          </p>
+                          <span className="text-[9px] font-bold text-slate-600 uppercase">Score Vue</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Filters Container */}
+                  <div className="bg-slate-900/40 border border-slate-800/60 p-5 rounded-[40px] space-y-5 shadow-2xl backdrop-blur-sm">
+                    <div className="flex items-center justify-between px-2">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-slate-950 border border-slate-800 flex items-center justify-center">
+                          <Filter className="w-3.5 h-3.5 text-indigo-400" />
+                        </div>
+                        <p className="text-[10px] font-black uppercase tracking-[0.3em] text-white">Moteur de Filtrage</p>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        {filteredAndSortedHistory.length > 0 && (
+                          <button 
+                            onClick={() => downloadHistoryCSV(filteredAndSortedHistory)}
+                            className="flex items-center gap-2 px-4 py-1.5 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-[9px] font-black uppercase text-indigo-400 hover:bg-indigo-500/20 transition-all animate-in fade-in slide-in-from-top-2"
+                            title="Télécharger ces résultats en CSV"
+                          >
+                            <Download className="w-3 h-3" /> Exporter la sélection ({filteredAndSortedHistory.length})
+                          </button>
+                        )}
+                        {(filterSubject !== 'ALL' || filterDate !== '' || searchTerm !== '') && (
+                          <button 
+                            onClick={() => { setFilterSubject('ALL'); setFilterDate(''); setSearchTerm(''); }}
+                            className="flex items-center gap-2 px-4 py-1.5 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-[9px] font-black uppercase text-indigo-400 hover:bg-indigo-500/20 transition-all animate-in fade-in slide-in-from-right-4"
+                          >
+                            <RotateCcw className="w-3 h-3" /> Réinitialiser
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="relative group">
+                      <Search className="absolute left-5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-700 group-focus-within:text-indigo-500 transition-colors" />
+                      <input 
+                        type="text" 
+                        placeholder="Filtrer par ID de transaction ou contenu du commentaire..." 
+                        value={searchTerm} 
+                        onChange={(e) => setSearchTerm(e.target.value)} 
+                        className="w-full bg-slate-950/80 border border-slate-800 rounded-2xl pl-12 pr-6 py-4 text-sm text-white focus:border-indigo-500 outline-none transition-all placeholder:text-slate-800 shadow-inner"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="relative">
+                        <Globe className="absolute left-5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-700" />
+                        <select 
+                          value={filterSubject}
+                          onChange={(e) => setFilterSubject(e.target.value)}
+                          className="w-full bg-slate-950/80 border border-slate-800 rounded-2xl pl-12 pr-10 py-3.5 text-[11px] font-black uppercase text-slate-400 outline-none focus:border-indigo-500 appearance-none transition-all cursor-pointer hover:bg-slate-950"
+                        >
+                          <option value="ALL">Tous les modules (Pédagogie + Env)</option>
+                          <option value="ENVIRONNEMENT_GLOBAL">🌍 Diagnostic Environnemental</option>
+                          <optgroup label="Modules d'Enseignement">
+                            {GI_SUBJECTS.map(s => <option key={s} value={s}>{s}</option>)}
+                          </optgroup>
+                        </select>
+                        <ChevronDown className="absolute right-5 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-700 pointer-events-none" />
+                      </div>
+                      <div className="relative">
+                        <Calendar className="absolute left-5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-700" />
+                        <input 
+                          type="date" 
+                          value={filterDate}
+                          onChange={(e) => setFilterDate(e.target.value)}
+                          className="w-full bg-slate-950/80 border border-slate-800 rounded-2xl pl-12 pr-6 py-3 text-[11px] font-black uppercase text-slate-400 outline-none focus:border-indigo-500 transition-all [color-scheme:dark]"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Results List */}
+                  <div className="space-y-3">
+                    <div className="flex justify-between items-center px-4 mb-4">
+                      <p className="text-[10px] font-bold text-slate-600 uppercase tracking-widest flex items-center gap-2">
+                        <div className="w-1.5 h-1.5 rounded-full bg-indigo-500"></div>
+                        Affichage de {filteredAndSortedHistory.length} entrées archivées
+                      </p>
+                    </div>
+
+                    <div className="overflow-hidden rounded-[32px] border border-slate-800 bg-slate-900/30 shadow-2xl backdrop-blur-sm">
+                      <div className="overflow-x-auto custom-scrollbar">
+                        <table className="w-full text-left border-collapse min-w-[700px]">
+                          <thead className="bg-slate-950/90 backdrop-blur-xl sticky top-0 z-20">
+                            <tr>
+                              <th className="p-5 text-[10px] font-black uppercase tracking-widest text-slate-500 cursor-pointer hover:text-white transition-colors group" onClick={() => toggleSort('timestamp')}>
+                                <div className="flex items-center gap-2">
+                                  Horodatage {sortConfig.key === 'timestamp' && (sortConfig.order === 'asc' ? <ChevronUp className="w-3.5 h-3.5 text-indigo-400" /> : <ChevronDown className="w-3.5 h-3.5 text-indigo-400" />)}
+                                </div>
+                              </th>
+                              <th className="p-5 text-[10px] font-black uppercase tracking-widest text-slate-500 cursor-pointer hover:text-white transition-colors group" onClick={() => toggleSort('subject')}>
+                                <div className="flex items-center gap-2">
+                                  Domaine Audit {sortConfig.key === 'subject' && (sortConfig.order === 'asc' ? <ChevronUp className="w-3.5 h-3.5 text-indigo-400" /> : <ChevronDown className="w-3.5 h-3.5 text-indigo-400" />)}
+                                </div>
+                              </th>
+                              <th className="p-5 text-[10px] font-black uppercase tracking-widest text-slate-500 cursor-pointer hover:text-white transition-colors text-center group" onClick={() => toggleSort('score')}>
+                                <div className="flex items-center justify-center gap-2">
+                                  Score Q. {sortConfig.key === 'score' && (sortConfig.order === 'asc' ? <ChevronUp className="w-3.5 h-3.5 text-indigo-400" /> : <ChevronDown className="w-3.5 h-3.5 text-indigo-400" />)}
+                                </div>
+                              </th>
+                              <th className="p-5 text-[10px] font-black uppercase tracking-widest text-slate-500">ID Transaction</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-800/40">
+                            {filteredAndSortedHistory.length === 0 ? (
+                              <tr>
+                                <td colSpan={4} className="p-24 text-center">
+                                  <div className="flex flex-col items-center gap-4 opacity-20">
+                                    <Search size={64} className="text-slate-500" />
+                                    <p className="text-xs font-black uppercase tracking-[0.4em] italic">Aucun diagnostic trouvé</p>
+                                  </div>
+                                </td>
+                              </tr>
+                            ) : (
+                              filteredAndSortedHistory.map((entry) => {
+                                const avgScore = entry.subject === 'ENVIRONNEMENT_GLOBAL' ? null : Math.round(((entry.q1||0) + (entry.q2||0) + (entry.q3||0) + (entry.q4||0) + (entry.q5||0)) / 5);
+                                return (
+                                  <tr key={entry.id} className="hover:bg-indigo-500/5 transition-all duration-300 group">
+                                    <td className="p-5 text-[11px] font-bold text-slate-400 font-mono whitespace-nowrap">{entry.timestamp}</td>
+                                    <td className="p-5">
+                                      <div className="flex flex-col">
+                                        <span className="text-[11px] font-black text-white uppercase tracking-tight">
+                                          {entry.subject === 'ENVIRONNEMENT_GLOBAL' ? '🌍 ENVIRONNEMENT GLOBAL' : entry.subject}
+                                        </span>
+                                        {entry.comments && (
+                                          <span className="text-[9px] text-slate-600 font-medium italic truncate max-w-[200px] mt-1">
+                                            "{entry.comments}"
+                                          </span>
+                                        )}
+                                      </div>
+                                    </td>
+                                    <td className="p-5 text-center">
+                                      {avgScore !== null ? (
+                                        <div className="flex flex-col items-center gap-1.5">
+                                          <span className={`text-[11px] font-black px-3 py-1 rounded-xl shadow-lg ${avgScore >= 75 ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : avgScore >= 50 ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'}`}>
+                                            {avgScore}%
+                                          </span>
+                                          <div className="w-12 h-1 bg-slate-950 rounded-full overflow-hidden">
+                                            <div className={`h-full ${avgScore >= 75 ? 'bg-emerald-500' : avgScore >= 50 ? 'bg-indigo-500' : 'bg-red-500'}`} style={{ width: `${avgScore}%` }}></div>
+                                          </div>
+                                        </div>
+                                      ) : (
+                                        <div className="flex flex-col items-center gap-1">
+                                          <span className="text-[9px] font-black text-slate-600 uppercase tracking-widest bg-slate-950 px-2 py-0.5 rounded-lg border border-slate-800">Diag. Global</span>
+                                          <span className="text-[8px] text-slate-700 italic">N/A Score</span>
+                                        </div>
+                                      )}
+                                    </td>
+                                    <td className="p-5 text-[10px] text-indigo-500/60 font-mono font-bold group-hover:text-indigo-400 transition-colors uppercase tracking-widest">
+                                      {entry.id}
+                                    </td>
+                                  </tr>
+                                );
+                              })
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+              
+              <div className="pt-6 border-t border-slate-900 mt-auto">
+                <button 
+                  onClick={() => setAdminPass('')}
+                  className="w-full flex items-center justify-center gap-3 py-4 rounded-2xl bg-slate-900 text-slate-500 hover:text-red-400 hover:bg-red-500/5 border border-slate-800 transition-all font-black text-[9px] uppercase tracking-widest"
+                >
+                  <LogOut className="w-4 h-4" /> Quitter l'Administration
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <header className="bg-slate-950/60 backdrop-blur-xl border-b border-slate-900 sticky top-0 z-50 h-16 flex items-center">
+        <div className="max-w-4xl mx-auto px-6 w-full flex items-center justify-between">
+          <div className="flex items-center gap-3 cursor-pointer group" onClick={resetAll}>
+            <div className="p-1.5 bg-indigo-600 rounded-lg group-hover:rotate-12 transition-transform shadow-lg"><Factory className="text-white w-4 h-4" /></div>
+            <h1 className="font-black text-sm tracking-tighter uppercase">GI <span className="text-indigo-400">EVAL</span></h1>
           </div>
+          <button onClick={() => setSidebarOpen(true)} className="p-2 hover:bg-slate-900 rounded-xl text-slate-400 transition-all hover:text-white"><Menu className="w-5 h-5" /></button>
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-6 py-12">
-        {step === 'welcome' && (
-          <div className="space-y-16 animate-in fade-in slide-in-from-bottom-4 duration-700">
-            <div className="space-y-8 text-center md:text-left">
-              <h2 className="text-5xl md:text-7xl font-black tracking-tight uppercase leading-[0.85] text-white">VOTRE VOIX <br/><span className="text-indigo-400">EST DÉCISIVE.</span></h2>
-              
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                {/* Barre de Progression Globale Hero */}
-                <div className="lg:col-span-2 bg-slate-900/30 backdrop-blur-xl border-2 border-slate-800/60 p-10 rounded-[40px] shadow-3xl relative overflow-hidden group">
-                  <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:opacity-10 transition-opacity">
-                    <BarChart3 className="w-32 h-32 text-indigo-400" />
-                  </div>
-                  <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-8">
-                    <div className="space-y-2 text-left">
-                      <div className="flex items-center gap-3 text-indigo-400">
-                        <TrendingUp className="w-5 h-5" />
-                        <span className="text-[11px] font-black uppercase tracking-[0.4em]">Progression Totale du Diagnostic</span>
-                      </div>
-                      <p className="text-3xl font-black text-white uppercase tracking-tighter">
-                        {completedSubjects.length} <span className="text-slate-600">/ {totalTasks} ÉTAPES</span>
-                      </p>
-                    </div>
-                    <div className="flex-1 max-w-md w-full">
-                      <div className="flex items-center justify-between mb-3">
-                        <span className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Avancement Global</span>
-                        <span className="text-sm font-black text-indigo-400 tabular-nums">{Math.round(progress)}%</span>
-                      </div>
-                      <div className="h-5 bg-slate-950 rounded-full border border-slate-800 p-1 overflow-hidden relative shadow-inner">
-                        <div 
-                          className="h-full bg-indigo-600 rounded-full transition-all duration-1000 ease-out shadow-[0_0_15px_rgba(79,70,229,0.4)] relative overflow-hidden" 
-                          style={{ width: `${progress}%` }}
-                        >
-                           <div className="absolute inset-0 bg-stripes animate-slide-stripes opacity-20"></div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Card Accès Historique Global */}
-                <button 
-                  onClick={() => setStep('history')}
-                  className="bg-indigo-950/20 hover:bg-indigo-600 backdrop-blur-xl border-2 border-indigo-500/30 p-10 rounded-[40px] shadow-3xl relative overflow-hidden group text-left transition-all hover:-translate-y-2"
-                >
-                  <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:opacity-20 transition-opacity">
-                    <History className="w-24 h-24 text-white" />
-                  </div>
-                  <div className="relative z-10 h-full flex flex-col justify-between">
-                     <div className="p-4 bg-indigo-500 rounded-2xl w-fit mb-6 shadow-lg group-hover:bg-white transition-colors">
-                        <LayoutDashboard className="w-6 h-6 text-white group-hover:text-indigo-600" />
-                     </div>
-                     <div>
-                        <h3 className="text-2xl font-black text-white uppercase tracking-tighter mb-2 group-hover:text-white">DASHBOARD QUALITÉ</h3>
-                        <p className="text-[10px] font-black uppercase text-indigo-300 tracking-widest flex items-center gap-2 group-hover:text-white/80">
-                           Consulter les statistiques globales <ArrowUpRight className="w-4 h-4" />
-                        </p>
-                     </div>
-                  </div>
-                </button>
-              </div>
-
-              <div className="max-w-2xl bg-indigo-950/10 backdrop-blur-md border-2 border-indigo-500/10 p-8 rounded-[32px] space-y-4 shadow-2xl relative overflow-hidden group mx-auto md:mx-0">
-                <div className="absolute top-0 right-0 p-6 opacity-5 group-hover:opacity-10 transition-opacity">
-                  <ShieldCheck className="w-24 h-24 text-indigo-400" />
-                </div>
-                <div className="flex items-center gap-3 text-indigo-400">
-                  <Info className="w-5 h-5" />
-                  <span className="text-[10px] font-black uppercase tracking-widest">Note d'information</span>
-                </div>
-                <p className="text-slate-300 text-lg font-medium leading-relaxed italic relative z-10">
-                  Questionnaire de satisfaction anonyme : votre avis pour optimiser la qualité pédagogique de l'Institut de Génie Industriel.
-                </p>
-              </div>
-
-              {completedSubjects.length < totalTasks && (
-                <div className="flex justify-center md:justify-start">
-                  <button onClick={startNextEvaluation} className="flex items-center gap-4 px-10 py-6 bg-indigo-600 hover:bg-indigo-500 rounded-3xl font-black text-sm uppercase tracking-widest transition-all shadow-2xl active:scale-95 group border-b-4 border-indigo-800">
-                    CONTINUER LE DIAGNOSTIC <ChevronRight className="w-5 h-5 animate-bounce-x" />
-                  </button>
-                </div>
-              )}
+      {(step === 'form_pedagogy' || step === 'form_env') && (
+        <div className="sticky top-16 z-40 w-full bg-slate-950/80 backdrop-blur-md border-b border-slate-900 px-6 py-4">
+          <div className="max-w-3xl mx-auto flex items-center gap-6">
+            <button onClick={step === 'form_pedagogy' ? () => setStep('modules') : backToHub} className="p-2 hover:bg-slate-900 rounded-xl text-slate-500"><ArrowLeft className="w-5 h-5" /></button>
+            <div className="flex-1">
+               <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">
+                 {step === 'form_pedagogy' ? `Matière : ${selectedSubject}` : 'Diagnostic Environnemental'}
+               </p>
+               <div className="h-2 bg-slate-900 rounded-full overflow-hidden">
+                 <div className="h-full bg-indigo-500 transition-all duration-700" style={{ width: `${progressStats.percentage}%` }}></div>
+               </div>
             </div>
+            <div className="text-right">
+              <span className="text-xl font-black text-indigo-400">{progressStats.completed}/{progressStats.total}</span>
+            </div>
+          </div>
+        </div>
+      )}
 
-            <section className="space-y-8">
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 border-t border-slate-800/50 pt-12">
-                <div className="flex items-center gap-3 px-4 py-2 bg-slate-900/30 backdrop-blur-md border-l-4 border-indigo-500 rounded-r-xl w-fit shadow-md">
-                  <GraduationCap className="w-4 h-4 text-indigo-400" />
-                  <span className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-300">Phase 1 : Évaluation des Modules</span>
-                </div>
-                <div className="relative w-full md:w-80">
-                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-                  <input type="text" placeholder="Rechercher un module..." value={searchQuery} onChange={(e)=>setSearchQuery(e.target.value)} className="w-full bg-slate-900/40 border border-slate-800 rounded-full py-3 pl-12 pr-6 text-sm outline-none focus:border-indigo-500 transition-all shadow-inner text-white" />
-                </div>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                {filteredModules.map(m => {
-                  const done = completedSubjects.includes(m.name);
-                  return (
-                    <div key={m.name} className={`flex flex-col p-8 rounded-[32px] border-2 transition-all text-left relative overflow-hidden group shadow-lg backdrop-blur-sm ${done ? 'bg-slate-900/40 border-emerald-500/20' : 'bg-slate-900/20 border-slate-800/60 hover:border-indigo-500/30'}`}>
-                      <div className="flex items-center justify-between mb-6">
-                        <div className={`p-3 rounded-xl bg-slate-950/40 border border-slate-800/60 shadow-sm`}>
-                          <m.icon className={`w-6 h-6 ${done ? 'text-emerald-500' : m.color}`} />
-                        </div>
-                        {done && (
-                          <div className="flex items-center gap-2 bg-emerald-500/10 px-2 py-1 rounded-full border border-emerald-500/20">
-                            <span className="text-[8px] font-black text-emerald-500 uppercase tracking-widest">Enregistré</span>
-                            <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                          </div>
-                        )}
-                      </div>
-                      <h4 className="text-lg font-black text-white leading-tight mb-2">{m.name}</h4>
-                      <p className="text-[9px] font-bold text-slate-600 uppercase tracking-widest mb-6">{m.category}</p>
-                      
-                      <div className="mt-auto grid grid-cols-2 gap-3">
-                        <button 
-                          onClick={() => { if(!done){ setFormData({...formData, subject: m.name, type: m.type}); setStep('form'); window.scrollTo({top:0, behavior:'smooth'}); } }}
-                          disabled={done}
-                          className={`py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all ${done ? 'bg-slate-800/40 text-slate-600 cursor-not-allowed' : 'bg-indigo-600 text-white hover:bg-indigo-500 hover:shadow-lg'}`}
-                        >
-                          {done ? 'TERMINE' : 'ÉVALUER'}
-                        </button>
-                        <button 
-                          onClick={() => openStats(m.name)}
-                          className="py-3 bg-slate-800/40 hover:bg-slate-700/60 text-indigo-300 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all border border-slate-700/60 flex items-center justify-center gap-2 shadow-sm"
-                        >
-                          <History className="w-3.5 h-3.5" /> HISTORIQUE
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </section>
-
-            <section className="space-y-6">
-              <div className="flex items-center gap-3 px-4 py-2 bg-slate-900/30 backdrop-blur-md border-l-4 border-emerald-500 rounded-r-xl w-fit shadow-md">
-                <LayoutDashboard className="w-4 h-4 text-emerald-500" />
-                <span className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-300">Phase 2 : Diagnostic Institutionnel</span>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {GLOBAL_DIAGNOSTICS.map(d => {
-                  const done = completedSubjects.includes(d.name);
-                  return (
-                    <div key={d.name} className={`flex flex-col p-8 rounded-[32px] border-2 transition-all text-left group relative overflow-hidden shadow-lg backdrop-blur-sm ${done ? 'bg-slate-900/40 border-emerald-500/20' : 'bg-slate-900/20 border-slate-800/60 hover:border-emerald-500/30'}`}>
-                      <div className="flex items-center gap-6 mb-6">
-                        <div className={`p-5 rounded-2xl border ${done ? 'bg-emerald-500/10 border-emerald-500/20 shadow-inner' : 'bg-slate-950/40 border-slate-800/60'}`}>
-                          <d.icon className={`w-8 h-8 ${done ? 'text-emerald-500' : d.color}`} />
-                        </div>
-                        <div className="flex-1">
-                          <h4 className="text-xl font-black text-white">{d.name}</h4>
-                          {done && <span className="text-[8px] font-black text-emerald-500 uppercase tracking-widest bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">Soumis</span>}
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-2 gap-4">
-                        <button 
-                          onClick={() => { if(!done){ setFormData({...formData, subject: d.name, type: d.type}); setStep('form'); window.scrollTo({top:0, behavior:'smooth'}); } }}
-                          disabled={done}
-                          className={`py-4 rounded-2xl font-black text-[11px] uppercase tracking-widest transition-all ${done ? 'bg-slate-800/40 text-slate-600 cursor-not-allowed' : 'bg-emerald-600 text-white hover:bg-emerald-500 hover:shadow-xl shadow-emerald-900/10'}`}
-                        >
-                          {done ? 'ÉVALUÉ' : 'RÉPONDRE'}
-                        </button>
-                        <button 
-                          onClick={() => openStats(d.name)}
-                          className="py-4 bg-slate-800/40 hover:bg-slate-700/60 text-emerald-300 rounded-2xl font-black text-[11px] uppercase tracking-widest transition-all border border-slate-700/60 flex items-center justify-center gap-2 shadow-sm"
-                        >
-                          <History className="w-4 h-4" /> HISTORIQUE
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </section>
+      <main className="max-w-3xl mx-auto px-6 py-12">
+        {step === 'welcome' && (
+          <div className="space-y-12 animate-in fade-in duration-700 text-center py-20">
+            <div className="inline-block p-4 bg-indigo-600/10 border border-indigo-500/20 rounded-full mb-6"><ShieldCheck className="w-16 h-16 text-indigo-400" /></div>
+            <h2 className="text-4xl md:text-6xl font-black text-white uppercase italic tracking-tighter leading-none">Enquête de <br/><span className="text-indigo-500">Satisfaction Étudiante</span></h2>
+            <p className="text-slate-400 text-lg italic max-w-xl mx-auto">Votre avis est l'outil principal de notre maintenance pédagogique.</p>
+            <button onClick={() => setStep('hub')} className="w-full py-8 bg-indigo-600 hover:bg-indigo-500 rounded-3xl font-black text-xs uppercase tracking-[0.4em] text-white shadow-2xl transition-all border-b-8 border-indigo-800 active:border-b-0 active:translate-y-2">Entrer dans le questionnaire</button>
           </div>
         )}
 
-        {step === 'history' && <HistoryListView />}
-        {step === 'stats' && <StatsView />}
-
-        {step === 'form' && (
-          <div className="max-w-3xl mx-auto space-y-10 animate-in fade-in slide-in-from-bottom-4 duration-500">
-            <div className="flex items-center justify-between bg-slate-900/40 backdrop-blur-xl p-10 rounded-[40px] border-2 border-slate-800/60 shadow-3xl">
-              <div>
-                <h3 className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.4em] mb-2">{formData.type === 'module' ? 'ÉVALUATION MODULE' : 'DIAGNOSTIC GLOBAL'}</h3>
-                <p className="text-3xl md:text-5xl font-black tracking-tighter uppercase text-white leading-none">{formData.subject}</p>
-              </div>
-              <button onClick={resetForm} className="px-6 py-3 bg-slate-800/60 hover:bg-slate-700 rounded-2xl border border-slate-700/60 font-black text-[9px] uppercase hover:bg-slate-700 transition-all">RETOUR</button>
+        {step === 'hub' && (
+          <div className="space-y-10 animate-in fade-in slide-in-from-bottom-6 duration-500">
+            <div className="flex items-center justify-between">
+              <div><h2 className="text-3xl font-black text-white uppercase italic tracking-tighter">Hub d'Enquête</h2><p className="text-xs font-bold text-slate-500 uppercase tracking-widest">Choisissez votre axe d'évaluation</p></div>
+              <button onClick={() => setStep('welcome')} className="p-3 bg-slate-900 rounded-2xl border border-slate-800 hover:text-white transition-colors"><ArrowLeft className="w-5 h-5" /></button>
             </div>
 
-            <form onSubmit={handleSubmit} className="space-y-10">
-              {formData.type === 'global_orientation' && (
-                <QuestionCard number={1} text="Je connais les métiers visés par cette formation." value={formData.q6} onChange={(v)=>setFormData({...formData, q6:v})} icon={Briefcase} showError={showValidationErrors} />
-              )}
-              
-              {formData.type === 'global_env' && (
-                <div className="space-y-8">
-                  <QuestionCard number={1} text="Les salles de cours sont adaptées (bruit, éclairage, confort)." value={formData.q7_salles} onChange={(v)=>setFormData({...formData, q7_salles:v})} icon={Sun} showError={showValidationErrors} />
-                  <QuestionCard number={2} text="L’accès aux ressources (Wi-Fi, labo, bibliothèque, plateformes) est suffisant." value={formData.q7_ressources} onChange={(v)=>setFormData({...formData, q7_ressources:v})} icon={Wifi} showError={showValidationErrors} />
-                  <QuestionCard number={3} text="Disposez-vous personnellement d’un ordinateur portable pour vos études ?" value={formData.q7_pc} onChange={(v)=>setFormData({...formData, q7_pc:v})} icon={Laptop} showError={showValidationErrors} options={[{ label: 'NON', value: 0 }, { label: 'OUI', value: 100 }]} />
-                  <div className={`bg-slate-900/40 backdrop-blur-md p-8 rounded-3xl border-2 transition-all ${showValidationErrors && !formData.q7_transport ? 'border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.1)]' : 'border-slate-800/60'}`}>
-                    <div className="flex items-center gap-4 mb-8">
-                      <div className="p-3 bg-amber-500/10 rounded-xl"><Car className="w-6 h-6 text-amber-500" /></div>
-                      <h4 className="text-xl font-black uppercase tracking-tighter text-white">Moyen de transport principal</h4>
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      {TRANSPORT_MODES.map((mode) => (
-                        <button key={mode.id} type="button" onClick={() => setFormData({...formData, q7_transport: mode.id})} className={`flex items-center gap-4 p-4 rounded-2xl border-2 transition-all text-left ${formData.q7_transport === mode.id ? 'bg-amber-900/20 border-amber-500 text-white shadow-lg' : 'bg-slate-950/40 border-slate-800/60 text-slate-400 hover:border-slate-700'}`}>
-                          <mode.icon className="w-5 h-5" />
-                          <span className="font-bold text-sm uppercase tracking-widest">{mode.label}</span>
-                        </button>
-                      ))}
-                    </div>
+            {firstUncompletedSubject && (
+              <button 
+                onClick={() => startPedagogy(firstUncompletedSubject)}
+                className="w-full p-8 rounded-[40px] bg-indigo-600 border-2 border-indigo-500 hover:bg-indigo-500 transition-all group flex items-center justify-between shadow-2xl shadow-indigo-500/20"
+              >
+                <div className="flex items-center gap-5">
+                  <div className="w-12 h-12 bg-white/10 rounded-2xl flex items-center justify-center">
+                    <Zap className="text-white w-6 h-6 animate-pulse" />
+                  </div>
+                  <div className="text-left">
+                    <h3 className="text-lg font-black text-white uppercase leading-none">Continuer les Évaluations</h3>
+                    <p className="text-[10px] font-bold text-indigo-100 uppercase tracking-widest mt-1 italic">Prochain : {firstUncompletedSubject}</p>
                   </div>
                 </div>
-              )}
+                <Play className="w-6 h-6 text-white group-hover:translate-x-1 transition-transform" />
+              </button>
+            )}
 
-              {formData.type === 'module' && (
-                <div className="space-y-6">
-                  {[
-                    { n: 1, t: "Les objectifs du cours ont été clairement présentés.", i: Target, k: 'q1' },
-                    { n: 2, t: "L’enseignant favorise les questions et échanges.", i: MessageSquare, k: 'q2' },
-                    { n: 3, t: "L’enseignant est disponible pour un soutien hors cours.", i: Clock, k: 'q3' },
-                    { n: 4, t: "Les explications et supports sont clairs.", i: Layers, k: 'q4' },
-                    { n: 5, t: "Les évaluations reflètent les acquis réels.", i: Award, k: 'q5' }
-                  ].map(q => (
-                    <QuestionCard key={q.k} number={q.n} text={q.t} value={formData[q.k as keyof FeedbackData] as any} onChange={(v)=>setFormData({...formData, [q.k]:v})} icon={q.i} showError={showValidationErrors} />
-                  ))}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <button onClick={() => setStep('modules')} className="p-10 rounded-[40px] bg-slate-900/40 border-2 border-slate-800 hover:border-indigo-500/50 hover:bg-slate-900 transition-all group text-left relative overflow-hidden">
+                <div className="w-14 h-14 bg-indigo-500/20 rounded-2xl flex items-center justify-center mb-6"><Book className="text-indigo-400 w-7 h-7" /></div>
+                <h3 className="text-xl font-black text-white uppercase mb-2">Qualité Enseignement</h3>
+                <p className="text-xs text-slate-500 leading-relaxed font-bold uppercase tracking-tight">Audit pédagogique détaillé par matière (5 critères essentiels).</p>
+                <div className="mt-6 flex items-center justify-between">
+                   <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Accéder aux modules →</span>
+                   <span className="bg-slate-950 px-3 py-1 rounded-full text-[9px] font-bold text-slate-500">{completedSubjects.length}/{GI_SUBJECTS.length}</span>
                 </div>
-              )}
-
-              <div className="bg-slate-900/40 backdrop-blur-md border-l-8 border-indigo-800 p-10 rounded-3xl space-y-6 shadow-xl">
-                <div className="flex items-center gap-3">
-                  <MessageSquareText className="w-5 h-5 text-indigo-400/50" />
-                  <label className="font-black text-[10px] uppercase tracking-widest text-white">Observations Supplémentaires (Optionnel)</label>
+              </button>
+              <button onClick={startEnvAudit} className={`p-10 rounded-[40px] border-2 transition-all text-left relative overflow-hidden ${envAuditDone ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-slate-900/40 border-slate-800 hover:border-emerald-500/50 hover:bg-slate-900'}`}>
+                <div className="w-14 h-14 rounded-2xl flex items-center justify-center mb-6 bg-emerald-500/20"><Building2 className="w-7 h-7 text-emerald-400" /></div>
+                <h3 className={`text-xl font-black uppercase mb-2 ${envAuditDone ? 'text-emerald-200' : 'text-white'}`}>Cadre de Vie & Métiers</h3>
+                <p className="text-xs text-slate-500 leading-relaxed font-bold uppercase tracking-tight">Audit global sur l'environnement, les ressources et l'orientation.</p>
+                <div className="mt-6">
+                   {envAuditDone ? <span className="flex items-center gap-2 text-emerald-400 text-[10px] font-black uppercase tracking-widest"><CheckCircle2 className="w-4 h-4" /> Audit Terminé</span> : <span className="text-[10px] font-black text-emerald-400 uppercase tracking-widest">Démarrer l'audit global →</span>}
                 </div>
-                <textarea value={formData.comments} onChange={(e)=>setFormData({...formData, comments:e.target.value})} placeholder="Dites-nous en plus..." rows={3} className="w-full bg-slate-950/40 border-2 border-slate-800/60 rounded-2xl p-6 text-lg focus:border-indigo-500 outline-none transition-all resize-none shadow-inner text-white" />
-              </div>
-
-              <div className="flex flex-col gap-6 pt-6">
-                {showValidationErrors && !isFormValid && (
-                  <div className="flex items-center gap-3 p-5 bg-red-500/10 border border-red-500/20 rounded-2xl text-red-400">
-                    <AlertCircle className="w-5 h-5" /><p className="text-xs font-black uppercase">Réponses incomplètes pour ce diagnostic.</p>
-                  </div>
-                )}
-                <button type="submit" className="w-full py-8 rounded-[2rem] font-black text-2xl uppercase tracking-widest transition-all flex items-center justify-center gap-5 bg-gradient-to-br from-indigo-700 to-indigo-500 text-white shadow-2xl active:scale-95 group border-b-4 border-indigo-900 hover:brightness-110">
-                  <Send className="w-7 h-7 group-hover:-translate-y-1 group-hover:translate-x-1 transition-transform" /> TRANSMETTRE
-                </button>
-              </div>
-            </form>
+              </button>
+            </div>
           </div>
+        )}
+
+        {step === 'modules' && (
+          <div className="space-y-8 animate-in fade-in duration-500">
+            <div className="flex items-center justify-between">
+              <h2 className="text-2xl font-black text-white uppercase italic tracking-tighter">Catalogue des Modules</h2>
+              <button onClick={backToHub} className="p-3 bg-slate-900 rounded-xl border border-slate-800 hover:text-white transition-colors"><ArrowLeft className="w-4 h-4" /></button>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {GI_SUBJECTS.map((s, idx) => {
+                const isDone = completedSubjects.includes(s);
+                return (
+                  <button key={idx} onClick={() => !isDone && startPedagogy(s)} disabled={isDone} className={`p-6 rounded-[32px] border-2 text-left transition-all relative overflow-hidden flex flex-col justify-between min-h-[140px] ${isDone ? 'bg-indigo-500/5 border-indigo-500/20 opacity-50' : 'bg-slate-900/40 border-slate-800 hover:border-indigo-500/40'}`}>
+                    <div>
+                      <div className="flex justify-between items-center mb-4">
+                        <div className="p-2 bg-slate-950 rounded-lg"><Book className={`w-4 h-4 ${isDone ? 'text-slate-700' : 'text-indigo-400'}`} /></div>
+                        {isDone && <CheckCircle2 className="w-5 h-5 text-indigo-500" />}
+                      </div>
+                      <h3 className="font-black text-sm uppercase tracking-tight text-white">{s}</h3>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {(step === 'form_pedagogy' || step === 'form_env') && (
+          <form onSubmit={handleFormSubmit} className="space-y-12 animate-in slide-in-from-bottom-6 duration-500">
+            {step === 'form_pedagogy' ? (
+              <div className="space-y-8">
+                <div className="bg-indigo-600/10 border border-indigo-500/20 p-6 rounded-[32px] mb-8">
+                   <p className="text-xs font-black uppercase tracking-widest text-indigo-400 mb-2">Enquête Pédagogique</p>
+                   <h2 className="text-xl font-black text-white italic leading-tight uppercase">Veuillez évaluer les affirmations suivantes concernant le cours de <span className="text-indigo-400 underline decoration-indigo-500/50">{selectedSubject}</span></h2>
+                </div>
+                <QuestionCard number={1} icon={Target} text="Les objectifs du cours ont été clairement présentés au début." value={formData.q1} onChange={(v) => setFormData({...formData, q1: v as number})} showError={showValidationErrors} />
+                <QuestionCard number={2} icon={MessageSquare} text="L’enseignant favorise les questions et échanges pendant le cours." value={formData.q2} onChange={(v) => setFormData({...formData, q2: v as number})} showError={showValidationErrors} />
+                <QuestionCard number={3} icon={Info} text="L’enseignant est disponible pour répondre aux questions hors cours." value={formData.q3} onChange={(v) => setFormData({...formData, q3: v as number})} showError={showValidationErrors} />
+                <QuestionCard number={4} icon={BookOpen} text="Les explications et les supports de cours sont clairs et bien structurés." value={formData.q4} onChange={(v) => setFormData({...formData, q4: v as number})} showError={showValidationErrors} />
+                <QuestionCard number={5} icon={Award} text="Les évaluations (examens, devoirs, projets) reflètent les compétences acquises." value={formData.q5} onChange={(v) => setFormData({...formData, q5: v as number})} showError={showValidationErrors} />
+              </div>
+            ) : (
+              <div className="space-y-8">
+                <div className="bg-emerald-600/10 border border-emerald-500/20 p-6 rounded-[32px] mb-8">
+                   <p className="text-xs font-black uppercase tracking-widest text-emerald-400 mb-2">Enquête Environnementale</p>
+                   <h2 className="text-xl font-black text-white italic leading-tight uppercase">Évaluation du cadre de vie et des ressources de l'Institut</h2>
+                </div>
+                <QuestionCard number={1} icon={HelpCircle} text="Je connais les métiers visés par cette formation." value={formData.q6_jobs} onChange={(v) => setFormData({...formData, q6_jobs: v as string})} showError={showValidationErrors} options={[{label:'Oui', value:'Oui'}, {label:'Non', value:'Non'}, {label:'Flou', value:'Flou'}]} />
+                <QuestionCard number={2} icon={MapPin} text="Les salles de cours sont adaptées (bruit, éclairage, confort)." value={formData.q7_rooms} onChange={(v) => setFormData({...formData, q7_rooms: v as number})} showError={showValidationErrors} />
+                <QuestionCard number={3} icon={ShieldCheck} text="L’accès aux ressources (Wi-Fi, labo, bibliothèque, plateformes) est suffisant." value={formData.q8_resources} onChange={(v) => setFormData({...formData, q8_resources: v as number})} showError={showValidationErrors} />
+                <QuestionCard number={4} icon={Truck} text="Quel est votre principal moyen de transport pour venir à l’institut ?" value={formData.q9_transport} onChange={(v) => setFormData({...formData, q9_transport: v as string})} showError={showValidationErrors} options={[{label:'Voiture Fam', value:'Voiture familiale'}, {label:'Bus Public', value:'Bus public'}, {label:'Voiture Perso', value:'Voiture personnelle'}, {label:'Taxi', value:'Taxi'}, {label:'Moto', value:'Moto'}]} />
+                <QuestionCard number={5} icon={Laptop} text="Disposez-vous d'un ordinateur portable pour vos travaux ?" value={formData.q10_laptop} onChange={(v) => setFormData({...formData, q10_laptop: v as string})} showError={showValidationErrors} options={[{label:'Oui', value:'Oui'}, {label:'Non', value:'Non'}]} />
+              </div>
+            )}
+            <div className="p-10 rounded-[40px] bg-slate-900/40 border border-slate-800"><label className="flex items-center gap-3 text-[12px] font-black uppercase tracking-widest text-white mb-6"><MessageSquare className="w-5 h-5 text-indigo-400" /> Suggestions libres</label><textarea value={formData.comments} onChange={(e) => setFormData({...formData, comments: e.target.value})} placeholder="Commentaires additionnels..." className="w-full h-32 bg-slate-950 border border-slate-800 rounded-2xl p-6 text-sm text-white focus:border-indigo-500 outline-none transition-all" /></div>
+            <button type="submit" className="w-full py-10 bg-emerald-600 hover:bg-emerald-500 rounded-[40px] font-black text-sm uppercase tracking-[0.4em] text-white shadow-2xl transition-all border-b-8 border-emerald-800 active:border-b-0 active:translate-y-2 mb-20 hover:animate-subtle-pulse hover:shadow-emerald-500/50">Soumettre l'Enquête</button>
+          </form>
         )}
 
         {step === 'submitting' && (
-          <div className="max-w-xl mx-auto py-32 space-y-10 text-center animate-in zoom-in duration-700">
-            <div className="inline-flex p-8 bg-indigo-500/10 rounded-full border border-indigo-500/20 animate-subtle-pulse shadow-2xl">
-              {submittingPhase === 'analyzing' ? <Activity className="w-16 h-16 text-indigo-500" /> : <Mail className="w-16 h-16 text-indigo-500 animate-bounce" />}
-            </div>
-            <h2 className="text-5xl font-black uppercase text-white tracking-tighter">{submittingPhase === 'analyzing' ? 'IA ANALYSE' : 'TRANSMISSION'}</h2>
-            <div className="bg-slate-900/40 backdrop-blur-xl p-12 rounded-[50px] border border-slate-800/60 relative overflow-hidden shadow-2xl">
-               <div className="h-16 w-full bg-slate-950/40 rounded-full p-2 border border-slate-800/60 relative shadow-inner">
-                 <div className="h-full bg-indigo-500 rounded-full transition-all duration-300 relative shadow-[0_0_20px_rgba(99,102,241,0.4)]" style={{ width: `${submissionProgress}%` }}>
-                    <div className="absolute inset-0 bg-stripes animate-slide-stripes opacity-20"></div>
-                 </div>
-               </div>
-               <p className="mt-8 text-3xl font-black text-white tabular-nums">{submissionProgress}%</p>
+          <div className="fixed inset-0 z-[200] bg-slate-950/95 flex flex-col items-center justify-center backdrop-blur-xl">
+            <div className="w-full max-w-md px-10">
+              <div className="flex justify-between items-end mb-6">
+                <div className="space-y-1">
+                  <p className="text-[10px] font-black uppercase tracking-[0.3em] text-indigo-400 animate-pulse">Diagnostic IA actif</p>
+                  <p className="text-xl font-black text-white uppercase italic tracking-tighter">Traitement des données...</p>
+                </div>
+                <div className="text-right">
+                  <span className="text-3xl font-black text-indigo-500 font-mono animate-pulse">...</span>
+                </div>
+              </div>
+              
+              <div className="h-4 w-full bg-slate-900 rounded-full overflow-hidden border border-slate-800 shadow-[inset_0_2px_10px_rgba(0,0,0,0.5)] relative">
+                <div className="absolute inset-0 bg-stripes opacity-10 animate-slide-stripes"></div>
+                <div className="h-full bg-indigo-600 shadow-[0_0_25px_rgba(79,70,229,0.4)] rounded-full animate-progress-fill relative">
+                  <div className="absolute inset-0 bg-white/20 animate-shimmer"></div>
+                </div>
+              </div>
+              
+              <div className="mt-8 flex flex-col items-center space-y-2">
+                <p className="text-[9px] font-black uppercase tracking-[0.5em] text-slate-500 text-center animate-pulse">Synchronisation e-UNA sécurisée</p>
+                <div className="flex gap-1.5">
+                  <div className="w-1 h-1 rounded-full bg-indigo-500 animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                  <div className="w-1 h-1 rounded-full bg-indigo-500 animate-bounce" style={{ animationDelay: '200ms' }}></div>
+                  <div className="w-1 h-1 rounded-full bg-indigo-500 animate-bounce" style={{ animationDelay: '400ms' }}></div>
+                </div>
+              </div>
             </div>
           </div>
         )}
 
         {step === 'thanks' && (
-          <div className="max-w-3xl mx-auto space-y-12 pb-24 text-center animate-in zoom-in duration-500">
-            <div className="bg-slate-900/40 backdrop-blur-xl rounded-[60px] border-2 border-slate-800/60 overflow-hidden shadow-3xl">
-              <div className="p-20 bg-emerald-600/90">
-                <CheckCircle2 className="w-20 h-20 mx-auto mb-8 text-white" />
-                <h2 className="text-7xl font-black uppercase leading-none mb-4 tracking-tighter text-white">SUCCÈS !</h2>
-                <p className="text-xl font-bold text-white/90">{formData.subject} a été enregistré avec succès.</p>
+          <div className="py-10 text-center space-y-12 animate-in zoom-in duration-700">
+            <div className="w-32 h-32 bg-emerald-500 rounded-[48px] flex items-center justify-center mx-auto rotate-12 shadow-2xl"><CheckCircle2 className="w-16 h-16 text-white -rotate-12" /></div>
+            <div className="space-y-6"><h2 className="text-6xl font-black text-white uppercase italic tracking-tighter leading-none">Enquête Archivée</h2><p className="text-slate-400 text-xl italic leading-relaxed max-w-lg mx-auto">Merci pour votre contribution à l'amélioration de <span className="text-white font-bold">{formData.subject === 'ENVIRONNEMENT_GLOBAL' ? "l'environnement global" : selectedSubject}</span>.</p></div>
+            <div className="max-w-md mx-auto bg-slate-900 border border-slate-800 p-8 rounded-[48px] space-y-6 shadow-2xl">
+              <span className="text-[10px] font-black uppercase tracking-widest text-indigo-500">Référence unique de l'audit</span>
+              <div className="flex items-center gap-4 bg-slate-950 px-6 py-4 rounded-2xl border border-slate-800 group hover:border-indigo-500/50 transition-all">
+                <code className="flex-1 text-2xl font-black text-white tracking-widest font-mono">{lastSubmissionId}</code>
+                <button onClick={copyToClipboard} className="text-slate-500 hover:text-white transition-colors p-2"><Copy className="w-5 h-5" /></button>
               </div>
-              <div className="p-16 space-y-12">
-                {analysisResult && (
-                  <div className="bg-slate-950/40 backdrop-blur-md p-10 rounded-[40px] text-left border border-slate-800/60 shadow-inner">
-                    <div className="flex items-center gap-3 mb-6">
-                      <Sparkles className="w-6 h-6 text-indigo-400" />
-                      <h4 className="font-black uppercase text-indigo-200 tracking-widest text-sm">Synthèse Qualité GI</h4>
-                    </div>
-                    <p className="text-slate-300 text-lg leading-relaxed italic">"{analysisResult.summary}"</p>
-                  </div>
-                )}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                  <button onClick={startNextEvaluation} className="bg-indigo-600 hover:bg-indigo-500 py-8 rounded-3xl font-black text-xl uppercase transition-all flex items-center justify-center gap-4 text-white shadow-xl hover:-translate-y-1">SUIVANT <ChevronRight className="w-6 h-6" /></button>
-                  <button onClick={() => openStats(formData.subject)} className="bg-slate-800/60 hover:bg-slate-700/80 py-8 rounded-3xl font-black text-xl uppercase transition-all flex items-center justify-center gap-4 border border-slate-700/60 shadow-xl hover:-translate-y-1 text-white">STATISTIQUES <History className="w-6 h-6" /></button>
-                </div>
-              </div>
+              {showCopyFeedback && <p className="text-emerald-400 text-[9px] font-black uppercase animate-pulse">ID Copié avec succès !</p>}
+            </div>
+            <div className="flex flex-col gap-4 max-w-sm mx-auto">
+              <button onClick={copyToClipboard} className="w-full py-8 bg-slate-900 border border-slate-800 hover:border-indigo-500/50 rounded-[32px] font-black uppercase text-[12px] text-white tracking-[0.3em] shadow-xl transition-all active:scale-95 flex items-center justify-center gap-3 group">
+                <Share2 className="w-5 h-5 text-indigo-400 group-hover:scale-110 transition-transform" /> Partager mon Diagnostic
+              </button>
+              <button onClick={backToHub} className="w-full py-8 bg-indigo-600 hover:bg-indigo-500 rounded-[32px] font-black uppercase text-[12px] text-white tracking-[0.3em] shadow-xl hover:shadow-indigo-900/40 transition-all active:scale-95">Retour au Hub</button>
             </div>
           </div>
         )}
       </main>
 
-      {showConfirmModal && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-xl animate-in fade-in duration-300">
-          <div className="bg-slate-900 border-2 border-slate-800/60 p-16 rounded-[60px] max-w-lg w-full text-center space-y-10 animate-in zoom-in duration-300 shadow-3xl backdrop-blur-2xl">
-            <div className="w-20 h-20 bg-indigo-500/10 rounded-full flex items-center justify-center mx-auto border border-indigo-500/20">
-              <AlertCircle className="w-10 h-10 text-indigo-500" />
-            </div>
-            <div>
-              <h2 className="text-4xl font-black uppercase text-white tracking-tighter">Confirmation</h2>
-              <p className="text-slate-400 text-lg font-medium mt-4">Soumettre ce diagnostic au système qualité de l'IUP ?</p>
-            </div>
-            <div className="flex flex-col gap-4">
-              <button onClick={handleConfirmSubmit} className="py-6 bg-indigo-600 hover:bg-indigo-500 rounded-3xl font-black text-lg uppercase transition-all text-white shadow-lg">CONFIRMER</button>
-              <button onClick={()=>setShowConfirmModal(false)} className="py-6 bg-slate-800/60 hover:bg-slate-700 rounded-3xl font-black text-lg uppercase transition-all border border-slate-700/60 text-white">ANNULER</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showQrModal && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-950/95 backdrop-blur-3xl animate-in fade-in duration-500">
-          <div className="bg-slate-900/60 border-2 border-slate-800/60 p-16 rounded-[70px] max-w-xl w-full text-center space-y-10 relative shadow-3xl backdrop-blur-2xl">
-            <button onClick={()=>setShowQrModal(false)} className="absolute top-10 right-10 text-slate-500 hover:text-white transition-all bg-slate-800/60 p-2 rounded-full z-20"><XCircle className="w-8 h-8"/></button>
-            <h2 className="text-4xl font-black uppercase text-white tracking-tighter">Scanner / Partager</h2>
-            
-            <div className="aspect-square bg-white rounded-[4rem] p-10 mx-auto max-w-[320px] shadow-2xl relative flex items-center justify-center overflow-hidden">
-              <div className="absolute inset-0 border-8 border-slate-900 rounded-[4rem] pointer-events-none z-10"></div>
-              
-              {qrLoading && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center space-y-4 z-20 bg-white/90 backdrop-blur-sm animate-in fade-in duration-300">
-                  <Loader2 className="w-12 h-12 text-indigo-600 animate-spin" />
-                  <p className="text-[10px] font-black uppercase text-indigo-600 tracking-[0.3em] animate-pulse">Génération...</p>
-                </div>
-              )}
-              
-              <img 
-                src={`https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(window.location.href)}&bgcolor=ffffff&color=000000&margin=5`} 
-                alt="QR Code Interactif" 
-                onLoad={() => setQrLoading(false)}
-                className={`w-full h-full transition-opacity duration-700 ${qrLoading ? 'opacity-0' : 'opacity-100'}`} 
-              />
-              
-              {!qrLoading && (
-                <div className="absolute top-0 left-0 w-full h-2 bg-indigo-500 opacity-20 animate-scan pointer-events-none"></div>
-              )}
-            </div>
-            
-            <p className="text-slate-500 font-bold uppercase tracking-widest text-[10px]">Lien d'accès rapide pour mobile</p>
-          </div>
-        </div>
-      )}
+      <footer className="py-10 border-t border-slate-900/50 text-center opacity-40"><p className="text-[10px] font-black text-slate-700 uppercase tracking-[0.5em]">IUP - Génie Industriel • Excellence Qualité</p></footer>
     </div>
   );
 };

@@ -1,48 +1,37 @@
+export type RatingValue = number | string | null;
 
-export type RatingValue = 0 | 25 | 50 | 75 | 100 | null;
+export type FeedbackType = 'module' | 'global_env';
 
-export type FeedbackType = 'module' | 'global_orientation' | 'global_env';
+export interface AnalysisResult {
+  summary: string;
+  recommendations: string[];
+  sentiment: string;
+}
 
 export interface FeedbackData {
   subject: string;
-  type: FeedbackType;
-  q1: RatingValue; // Objectifs (Module)
-  q2: RatingValue; // Échanges (Module)
-  q3: RatingValue; // Soutien (Module)
-  q4: RatingValue; // Structure (Module)
-  q5: RatingValue; // Évaluation (Module)
-  q6: RatingValue; // Orientation (Global)
-  // Environnement détaillé
-  q7_salles: RatingValue; 
-  q7_ressources: RatingValue;
-  q7_pc: RatingValue;
-  q7_transport: string | null;
+  // Section 1: Pédagogie (25, 50, 75, 100)
+  q1: number | null; // Objectifs
+  q2: number | null; // Échanges
+  q3: number | null; // Disponibilité
+  q4: number | null; // Supports
+  q5: number | null; // Évaluations
+  // Section 2: Environnement & Métiers
+  q6_jobs: string | null; // Connaissance métiers (Oui/Non/Flou)
+  q7_rooms: number | null; // Salles (25, 50, 75, 100%)
+  q8_resources: number | null; // Ressources (25, 50, 75, 100%)
+  q9_transport: string | null; // Transport
+  q10_laptop: string | null; // Ordinateur portable (Oui/Non)
   comments: string;
 }
 
 export interface FeedbackEntry extends FeedbackData {
   id: string;
-  timestamp: number;
-}
-
-export interface AnalysisResult {
-  summary: string;
-  recommendations: string[];
-  sentiment: 'positive' | 'neutral' | 'negative';
+  timestamp: string; // Date_Heure automatique
 }
 
 export interface SubjectStats {
   averageScore: number;
   totalEntries: number;
-  qAverages: {
-    q1: number;
-    q2: number;
-    q3: number;
-    q4: number;
-    q5: number;
-    q6: number;
-    q7_salles: number;
-    q7_ressources: number;
-    q7_pc: number;
-  };
+  qAverages: Record<string, number>;
 }
