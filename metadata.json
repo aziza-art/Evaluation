@@ -1,5 +1,5 @@
 {
-  "name": "IUP Enquête Satisfaction",
+  "name": "ISGI Enquête Satisfaction",
   "description": "Plateforme d'enquête de satisfaction et d'évaluation de la qualité pour les étudiants de l'Institut de Génie Industriel.",
   "requestFramePermissions": [
     "camera"

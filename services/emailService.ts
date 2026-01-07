@@ -1,4 +1,3 @@
-
 import { AnalysisResult, FeedbackData } from "../types";
 
 /**
@@ -75,7 +74,7 @@ const validateEmail = (email: string): { isValid: boolean; reason?: string } => 
  * L'adresse est fixée pour garantir la réception institutionnelle.
  */
 export const sendAnalysisToAdmin = async (data: FeedbackData, result: AnalysisResult): Promise<boolean> => {
-  const adminEmail = "aziza@iup.e-una.mr";
+  const adminEmail = "aziza@isgi.e-una.mr";
   
   const validation = validateEmail(adminEmail);
   if (!validation.isValid) {
@@ -85,7 +84,7 @@ export const sendAnalysisToAdmin = async (data: FeedbackData, result: AnalysisRe
   
   const emailContent = {
     to: adminEmail,
-    subject: `[IUP-QUALITÉ] Nouveau Diagnostic : ${data.subject}`,
+    subject: `[ISGI-QUALITÉ] Nouveau Diagnostic : ${data.subject}`,
     body: `Sentiment : ${result.sentiment}\nSynthèse : ${result.summary}`
   };
 

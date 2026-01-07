@@ -1,7 +1,6 @@
-
 import { FeedbackData, FeedbackEntry, SubjectStats } from "../types";
 
-const STORAGE_KEY = "iup_evaluations_v3";
+const STORAGE_KEY = "isgi_evaluations_v3";
 
 const generateId = () => Math.random().toString(36).substring(2, 11).toUpperCase();
 
@@ -86,7 +85,7 @@ export const downloadHistoryCSV = (data?: FeedbackEntry[]): void => {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.setAttribute("href", url);
-  link.setAttribute("download", `iup_feedback_${new Date().getTime()}.csv`);
+  link.setAttribute("download", `isgi_feedback_${new Date().getTime()}.csv`);
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
@@ -106,7 +105,7 @@ export const downloadAggregatedStatsCSV = (subjectsList: string[]): void => {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.setAttribute("href", url);
-  link.setAttribute("download", "iup_aggregated_stats.csv");
+  link.setAttribute("download", "isgi_aggregated_stats.csv");
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
