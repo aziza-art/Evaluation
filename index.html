@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="Plateforme de feedback pour les étudiants de l'Institut Supérieur de Génie Industriel (ISGI).">
-    <title>Enquête de Satisfaction Étudiante - ISGI GIM</title>
+    <title>ISGI Qualité - Système d'Audit Académique</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -23,23 +23,6 @@
         .app-bg-gradient {
             background: radial-gradient(circle at 50% 0%, #0f172a 0%, #080b12 100%);
             min-height: 100vh;
-        }
-        ::-webkit-scrollbar {
-            width: 8px;
-        }
-        ::-webkit-scrollbar-track {
-            background: #080b12;
-        }
-        ::-webkit-scrollbar-thumb {
-            background: #1e293b;
-            border-radius: 10px;
-        }
-        ::-webkit-scrollbar-thumb:hover {
-            background: #334155;
-        }
-        @keyframes subtle-pulse {
-            0%, 100% { opacity: 0.8; transform: scale(1); }
-            50% { opacity: 1; transform: scale(1.02); }
         }
         @keyframes scanner-move {
           0% { top: 0; }
@@ -62,52 +45,30 @@
         .animate-shimmer {
             animation: shimmer 2s infinite linear;
         }
-        @keyframes pop {
-          0% { transform: scale(1); }
-          50% { transform: scale(1.05); }
-          100% { transform: scale(1); }
-        }
-        .animate-pop {
-          animation: pop 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-        }
-        @keyframes selection-glow {
-          0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4); }
-          70% { box-shadow: 0 0 0 20px rgba(16, 185, 129, 0); }
-          100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
-        }
-        .animate-selection-glow {
-          animation: selection-glow 0.8s ease-out;
-        }
-        @keyframes subtle-shake {
-            0%, 100% { transform: translateX(0); }
-            25% { transform: translateX(-4px); }
-            75% { transform: translateX(4px); }
-        }
-        .animate-subtle-shake {
-            animation: subtle-shake 0.3s ease-in-out 2;
-        }
-        .line-clamp-2 {
-          display: -webkit-box;
-          -webkit-line-clamp: 2;
-          -webkit-box-orient: vertical;
-          overflow: hidden;
+        .glass-panel {
+          background: rgba(15, 23, 42, 0.6);
+          backdrop-filter: blur(12px);
+          border: 1px solid rgba(255, 255, 255, 0.05);
         }
     </style>
 <script type="importmap">
 {
   "imports": {
-    "lucide-react": "https://esm.sh/lucide-react@^0.562.0",
-    "@google/genai": "https://esm.sh/@google/genai@^1.34.0",
+    "react": "https://esm.sh/react@^19.2.3",
     "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
     "react/": "https://esm.sh/react@^19.2.3/",
-    "react": "https://esm.sh/react@^19.2.3",
     "vitest": "https://esm.sh/vitest@^4.0.16",
-    "jsqr": "https://esm.sh/jsqr@1.4.0"
+    "vite": "https://esm.sh/vite@^7.3.1",
+    "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@^5.1.2",
+    "@google/genai": "https://esm.sh/@google/genai@^1.34.0",
+    "lucide-react": "https://esm.sh/lucide-react@^0.562.0",
+    "jsqr": "https://esm.sh/jsqr@^1.4.0"
   }
 }
 </script>
 </head>
-<body class="app-bg-gradient">
+<body class="app-bg-gradient industrial-pattern">
     <div id="root"></div>
+    <script type="module" src="/index.tsx"></script>
 </body>
 </html>
