@@ -1,6 +1,7 @@
 // Updated mock objects and tests to match percentage-based scaling
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { saveFeedback, getHistory, getCompletedSubjectNames, getSubjectStats } from './storageService';
+// Fix: Removed non-existent export 'getCompletedSubjectNames' from './storageService' imports as it is unused and not exported.
+import { saveFeedback, getHistory, getSubjectStats } from './storageService';
 import { FeedbackData } from '../types';
 
 // Mock localStorage
